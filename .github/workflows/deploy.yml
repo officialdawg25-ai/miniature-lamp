@@ -8,11 +8,12 @@ permissions:
   pages: write
   id-token: write
 concurrency:
-  group: github-pages
+  group: institutional-ai-pages-deploy
   cancel-in-progress: true
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
