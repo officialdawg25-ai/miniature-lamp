@@ -27,8 +27,8 @@ jobs:
           deno-version: v2.x
       - name: Validate XAUUSD ingestion function
         run: |
-          deno check supabase/functions/xauusd-ingestion/index.ts supabase/functions/xauusd-ingestion/validation_test.ts
-          deno test supabase/functions/xauusd-ingestion/validation_test.ts
+          deno check --config supabase/functions/xauusd-ingestion/deno.json supabase/functions/xauusd-ingestion/index.ts supabase/functions/xauusd-ingestion/validation_test.ts
+          deno test --config supabase/functions/xauusd-ingestion/deno.json supabase/functions/xauusd-ingestion/validation_test.ts
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Build
