@@ -21,6 +21,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Validate ingestion and intelligence functions
+        run: |
+          deno check --config supabase/functions/xauusd-ingestion/deno.json supabase/functions/xauusd-ingestion/index.ts supabase/functions/xauusd-ingestion/validation_test.ts
+          deno check --config supabase/functions/economic-ingestion/deno.json supabase/functions/economic-ingestion/index.ts
+          deno check --config supabase/functions/intelligence-engine/deno.json supabase/functions/intelligence-engine/index.ts supabase/functions/intelligence-engine/technical_test.ts
+          deno test --config supabase/functions/xauusd-ingestion/deno.json supabase/functions/xauusd-ingestion/validation_test.ts
+          deno test --config supabase/functions/intelligence-engine/deno.json supabase/functions/intelligence-engine/technical_test.ts
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Build
