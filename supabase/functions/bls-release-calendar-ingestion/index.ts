@@ -4,6 +4,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BLS_ICS_URL = "https://www.bls.gov/schedule/news_release/bls.ics";
+// Existing official BLS source row in core.data_sources; provider_release_calendars.source_id is NOT NULL.
+const BLS_SOURCE_ID = "e70d35d5-a4b2-4336-b4b2-3312bf51cd25";
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE);
 
 const corsHeaders = {
@@ -133,6 +135,7 @@ Deno.serve(async (req: Request) => {
       const period = getPeriod(summary);
       if (!period) { rejected.push({ summary, reason: "could not parse reference period from official summary" }); continue; }
       candidates.push({
+        source_id: BLS_SOURCE_ID,
         provider: "BLS",
         release_name: classification.releaseName,
         release_key: `${classification.prefix}|${period}`,
@@ -154,7 +157,7 @@ Deno.serve(async (req: Request) => {
 
     // Deduplicate within the feed on the database's actual unique key.
     const unique = new Map<string, typeof candidates[number]>();
-    for (const row of candidates) unique.set(`${row.provider}| ${row.release_key}|${row.scheduled_release_time}`, row);
+    for (const row of candidates) unique.set(`${row.provider}|${row.release_key}|${row.scheduled_release_time}`, row);
     const rows = [...unique.values()];
     if (!rows.length) return json({ status: "no_supported_events", dry_run: dryRun, events_seen: events.length, records_seen: 0, rejected, source_url: BLS_ICS_URL });
 
