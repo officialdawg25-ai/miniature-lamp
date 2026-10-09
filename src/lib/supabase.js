@@ -54,7 +54,7 @@ export function initializeSupabase() {
       return null;
     }
 
-    supabase = createClient(url.replace(/\\/$/, ''), key, {
+    supabase = createClient(url.replace(/\/$/, ''), key, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
