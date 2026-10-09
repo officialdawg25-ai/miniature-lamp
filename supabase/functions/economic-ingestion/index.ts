@@ -27,7 +27,7 @@ Deno.serve(async (req: Request) => {
   const { data, error } = await sb.auth.getUser(authorization.slice(7));
   if (error || !data.user) return reply(401, { ok: false, code: "UNAUTHORIZED", request_id: requestId });
 
-  const { data: access, error: accessError } = await sb.schema("private").from("institutional_access")
+  const { data: access, error: accessError } = await sb.from("institutional_access")
     .select("user_id").eq("user_id", data.user.id).eq("is_active", true).maybeSingle();
   if (accessError) return reply(500, { ok: false, code: "ACCESS_CHECK_FAILED", request_id: requestId });
   if (!access) return reply(403, { ok: false, code: "INSTITUTIONAL_ACCESS_REQUIRED", request_id: requestId });
