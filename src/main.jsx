@@ -1,4 +1,4 @@
-import React,{useState} from 'react';
+import React,{useEffect,useState} from 'react';
 import{createRoot}from'react-dom/client';
 import{Activity,BarChart3,BrainCircuit,ChevronDown,ChevronRight,Database,Globe2,Layers3,Search,Bell,ShieldCheck,TrendingUp,Target,BookOpen,Settings2,Menu,X,CalendarDays,Clock3,Sparkles}from'lucide-react';
 import'./style.css';
