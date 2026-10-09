@@ -121,10 +121,11 @@ Deno.serve(async (req: Request) => {
     const events = parseEvents(ics);
     const candidates = [];
     const rejected: Array<{ summary: string; reason: string }> = [];
+    let unsupportedEventsSkipped = 0;
     for (const e of events) {
       const summary = e.SUMMARY ?? "";
       const classification = classify(summary);
-      if (!classification) continue;
+      if (!classification) { unsupportedEventsSkipped++; continue; }
       if (!e.DTSTART) { rejected.push({ summary, reason: "missing DTSTART" }); continue; }
       const startValue = e.DTSTART.replace(/Z$/, "");
       const scheduled = localDateTimeToUtc(startValue, e.DTSTART_TZID ?? "America/New_York");
@@ -174,7 +175,8 @@ Deno.serve(async (req: Request) => {
       records_seen: rows.length,
       records_rejected: rejected.length,
       records_written: insertedOrUpdated,
-      records_skipped: Math.max(0, events.length - rows.length - rejected.length),
+      records_skipped: unsupportedEventsSkipped,
+      unsupported_events_skipped: unsupportedEventsSkipped,
       rejected,
       preview: rows.slice(0, 20),
     });
