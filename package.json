@@ -14,6 +14,6 @@
     "react": "latest",
     "react-dom": "latest",
     "lucide-react": "latest",
-    "@supabase/supabase-js": "^2.76.1"
+    "@supabase/supabase-js": "2.76.1"
   }
 }
