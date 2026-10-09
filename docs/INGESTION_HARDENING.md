@@ -8,15 +8,15 @@
 - Changes the generic `economic-ingestion` endpoint to authenticate institutional users and return an explicit `501 PROVIDER_ADAPTER_NOT_CONFIGURED` until an auditable provider adapter exists, rather than reporting a false success.
 - Adds an authenticated `intelligence-engine` endpoint that computes a transparent, bounded price-only technical score from actual daily bars and persists it to `intelligence.pair_scores`. It intentionally does not fabricate composite scores, currency scores, macro regimes or ML predictions when their validated inputs are missing.
 - Adds Deno checks and tests for the intelligence engine to GitHub Actions.
-- The XAUUSD and intelligence-engine functions are deliberately **not deployed** by this change. The XAUUSD function fails closed until the XAUUSD instrument, active Twelve Data provider registry entry, and `TWELVE_DATA_API_KEY` secret are configured.
+- The intelligence-engine function has now been deployed to Supabase with JWT verification enabled. It has **not yet been invoked with an authorized institutional user token**, so successful persistence and runtime behavior remain unverified. The XAUUSD function is not deployed; it fails closed until its provider registry and secret prerequisites are configured.
 
 ## Price-only intelligence baseline
 
 The baseline requires at least 21 valid daily closes for an instrument. It computes a log-return over the available window, daily return volatility, annualized volatility as a decimal ratio, and a bounded technical trend-strength score in [-100, 100]. The score is not a probability, target price, or calibrated forecast.
 
-Only `technical_score`, `expected_volatility`, and an explicit methodology/input explanation are populated. Fundamental, policy, yield, intermarket, sentiment, regime, ML and composite fields remain NULL. Instruments without enough valid bars are reported as skipped. The current live database audit found 5,000 daily bars for USDJPY and zero for XAUUSD and the other audited instruments; therefore USDJPY is currently the only instrument expected to produce a score.
+Only `technical_score`, `expected_volatility`, and an explicit methodology/input explanation are populated. Fundamental, policy, yield, intermarket, sentiment, regime, ML and composite fields remain NULL. Instruments without enough valid bars are reported as skipped. The live database audit found 5,000 daily bars for USDJPY and zero for XAUUSD and the other audited instruments; therefore USDJPY is currently the only instrument expected to produce a score.
 
-To run the function after review and deployment, send an authenticated POST request to the Supabase Edge Function endpoint with a valid signed-in user's bearer token. The endpoint independently checks active institutional access. It upserts by `(instrument_id, as_of)`, making repeat calls for the same latest bar idempotent. Do not deploy until the Deno checks pass and the source/schema review is complete.
+Invoke the deployed function using an authenticated POST request to `https://ieocpcapgwusbojzrrxr.supabase.co/functions/v1/intelligence-engine`, with a valid signed-in user's bearer token. The endpoint independently checks active institutional access. It upserts by `(instrument_id, as_of)`, making repeat calls for the same latest bar idempotent. Do not treat deployment as proof of successful execution: verify the returned JSON and confirm the persisted row and repeat-run behavior.
 
 ## XAUUSD deployment prerequisites
 
@@ -51,9 +51,10 @@ For each stored observation/revision preserve at least:
 
 ## Current validation and limitations
 
-- Commit `050d40061a21758adaf8f26a5ed398a5b4d9154a` passed both GitHub Actions and the Cloudflare Workers **preview build** checks. This confirms build success, not production deployment.
-- The SQL migrations have not been applied to Supabase and no new Edge Function has been deployed. The XAUUSD provider has not yet been configured or tested against live provider data.
-- This PR does not modify production market data.
+- Commit `050d40061a21758adaf8f26a5ed398a5b4d9154a` passed GitHub Actions and Cloudflare Workers **preview build** checks. The latest branch commit `60e6130a7144e4d18d4add8667507b9a855872c9` also passed GitHub Actions and Cloudflare preview checks.
+- Supabase function `intelligence-engine` was deployed as version 1 with `verify_jwt=true`. No authenticated invocation has been performed yet, and current logs show no invocation entries. No database migration has been applied by this step.
+- XAUUSD provider configuration is incomplete and the XAUUSD function has not been deployed or tested against live provider data.
+- This change has not modified existing production market bars. The first authorized engine invocation is expected to create/update price-only baseline score rows in `intelligence.pair_scores`; verify the output before relying on it.
 - The macro ingestion pipeline is not complete. Authoritative release timestamps and revision history must be populated from validated release evidence before observations become model-eligible.
 - The GitHub workflow validates the frontend and selected Deno functions; it is not a complete production release gate. npm dependencies are not yet reproducibly locked.
 - Daily precious-metal bars use the provider's date as a UTC-midnight session label. They must not be represented as an exact market-close timestamp without provider-specific evidence.
