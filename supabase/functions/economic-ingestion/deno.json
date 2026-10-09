@@ -1,1 +1,1 @@
-{"compilerOptions":{"strict":true,"lib":["deno.window"]}}
+{"compilerOptions":{"strict":true},"nodeModulesDir":"auto"}
