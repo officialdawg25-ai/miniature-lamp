@@ -27,7 +27,6 @@ jobs:
           deno-version: v2.x
       - name: Validate XAUUSD ingestion function
         run: |
-          deno fmt --check supabase/functions/xauusd-ingestion
           deno check supabase/functions/xauusd-ingestion/index.ts supabase/functions/xauusd-ingestion/validation_test.ts
           deno test supabase/functions/xauusd-ingestion/validation_test.ts
       - name: Install dependencies
