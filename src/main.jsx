@@ -17,6 +17,7 @@ function AuthRoot(){
   let active=true;
   let authEventSeen=false;
   const {data:{subscription}}=supabase.auth.onAuthStateChange((event,nextSession)=>{
+   if(event==="INITIAL_SESSION")return;
    authEventSeen=true;
    if(active){
     setSession(nextSession);
@@ -25,9 +26,15 @@ function AuthRoot(){
     setAuthReady(true);
    }
   });
-  supabase.auth.getSession().then(({data,error})=>{
+  supabase.auth.getSession().then(async({data,error})=>{
    if(!active||authEventSeen)return;
-   if(error)setSession(null);else setSession(data.session);
+   let verifiedSession=error?null:data.session;
+   if(verifiedSession){
+    const {data:{user},error:userError}=await supabase.auth.getUser(verifiedSession.access_token);
+    if(userError||!user)verifiedSession=null;
+   }
+   if(!active||authEventSeen)return;
+   setSession(verifiedSession);
    setAuthReady(true);
   }).catch(()=>{
    if(active&&!authEventSeen){setSession(null);setAuthReady(true);}
