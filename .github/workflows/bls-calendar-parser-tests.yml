@@ -1,0 +1,22 @@
+name: BLS calendar parser tests
+
+on:
+  push:
+    branches:
+      - feat/supabase-auth-login
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test-calendar-parser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Run parser tests
+        run: deno test --no-check supabase/functions/bls-release-calendar-ingestion/calendar-parser.test.ts
