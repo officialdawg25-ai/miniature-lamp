@@ -16,7 +16,15 @@ function validConfig(url, key) {
     return false;
   }
   // Supabase publishable keys are public client keys. Never accept service-role keys.
-  return key.startsWith('sb_publishable_') || (key.startsWith('eyJ') && key.split('.').length === 3);
+  if (key.startsWith('sb_publishable_')) return true;
+  // Support legacy anon JWTs only when the token explicitly declares anon role.
+  if (!key.startsWith('eyJ') || key.split('.').length !== 3) return false;
+  try {
+    const payload = JSON.parse(atob(key.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return payload.role === 'anon';
+  } catch {
+    return false;
+  }
 }
 
 export function initializeSupabase() {
