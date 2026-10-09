@@ -13,33 +13,40 @@ function AuthRoot(){
  const [authReady,setAuthReady]=useState(false);
  const [recoveryMode,setRecoveryMode]=useState(false);
  useEffect(()=>{
-  if(!supabase){setAuthReady(true);return;}
   let active=true;
   let authEventSeen=false;
-  const {data:{subscription}}=supabase.auth.onAuthStateChange((event,nextSession)=>{
-   if(event==="INITIAL_SESSION")return;
-   authEventSeen=true;
-   if(active){
-    setSession(nextSession);
-    if(event==="PASSWORD_RECOVERY")setRecoveryMode(true);
-    if(event==="SIGNED_OUT")setRecoveryMode(false);
+  let subscription=null;
+  (async()=>{
+   try{
+    await initializeSupabase();
+    if(!active)return;
+    if(!supabase){setAuthReady(true);return;}
+    const {data:{subscription:sub}}=supabase.auth.onAuthStateChange((event,nextSession)=>{
+     if(event==="INITIAL_SESSION")return;
+     authEventSeen=true;
+     if(active){
+      setSession(nextSession);
+      if(event==="PASSWORD_RECOVERY")setRecoveryMode(true);
+      if(event==="SIGNED_OUT")setRecoveryMode(false);
+      setAuthReady(true);
+     }
+    });
+    subscription=sub;
+    const {data,error}=await supabase.auth.getSession();
+    if(!active||authEventSeen)return;
+    let verifiedSession=error?null:data.session;
+    if(verifiedSession){
+     const {data:{user},error:userError}=await supabase.auth.getUser(verifiedSession.access_token);
+     if(userError||!user)verifiedSession=null;
+    }
+    if(!active||authEventSeen)return;
+    setSession(verifiedSession);
     setAuthReady(true);
+   }catch{
+    if(active)setAuthReady(true);
    }
-  });
-  supabase.auth.getSession().then(async({data,error})=>{
-   if(!active||authEventSeen)return;
-   let verifiedSession=error?null:data.session;
-   if(verifiedSession){
-    const {data:{user},error:userError}=await supabase.auth.getUser(verifiedSession.access_token);
-    if(userError||!user)verifiedSession=null;
-   }
-   if(!active||authEventSeen)return;
-   setSession(verifiedSession);
-   setAuthReady(true);
-  }).catch(()=>{
-   if(active&&!authEventSeen){setSession(null);setAuthReady(true);}
-  });
-  return ()=>{active=false;subscription.unsubscribe();};
+  })();
+  return ()=>{active=false;subscription?.unsubscribe();};
  },[]);
  if(!authReady)return <div className="auth-screen"><div className="auth-card"><Brand/><p className="auth-muted">Restoring secure session…</p></div></div>;
  if(supabaseConfigError||!supabase)return <div className="auth-screen"><div className="auth-card"><Brand/><div className="auth-message error" role="alert">Secure sign-in configuration could not be loaded. Refresh this page; if the issue persists, contact the platform administrator.</div></div></div>;
