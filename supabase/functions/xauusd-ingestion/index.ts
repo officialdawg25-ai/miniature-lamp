@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.0";
+import { normalizeProviderBar } from "./validation.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -10,12 +11,6 @@ const cors = {
 
 function respond(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), { status, headers: cors });
-}
-
-function positiveNumber(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 Deno.serve(async (req: Request) => {
@@ -70,20 +65,15 @@ Deno.serve(async (req: Request) => {
     const rows: Record<string, unknown>[] = [];
     let rejected = 0;
     for (const bar of payload.values) {
-      const day = String(bar.datetime ?? "");
-      const open = positiveNumber(bar.open);
-      const high = positiveNumber(bar.high);
-      const low = positiveNumber(bar.low);
-      const close = positiveNumber(bar.close);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || open === null || high === null || low === null || close === null ||
-          high < Math.max(open, close) || low > Math.min(open, close) || high < low) {
+      const normalized = normalizeProviderBar(bar);
+      if (!normalized) {
         rejected++;
         continue;
       }
       rows.push({
-        instrument_id: instrument.id, timeframe: "daily", ts: day + "T00:00:00Z",
-        open, high, low, close, volume: positiveNumber(bar.volume), spread: null,
-        source_id: source.id,
+        instrument_id: instrument.id, timeframe: "daily", ts: normalized.date + "T00:00:00Z",
+        open: normalized.open, high: normalized.high, low: normalized.low, close: normalized.close,
+        volume: normalized.volume, spread: null, source_id: source.id,
         metadata: { provider: "twelve_data", provider_symbol: "XAU/USD", interval: "1day", request_id: requestId },
       });
     }
