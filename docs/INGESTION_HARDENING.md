@@ -3,7 +3,9 @@
 ## Current change set
 
 - Mirrors the deployed `market-data-ingestion`, `economic-ingestion`, and `bls-economic-ingestion` sources into the repository so production function code is no longer missing from version control.
-- Adds a dedicated `xauusd-ingestion` Supabase Edge Function using Twelve Data's `XAU/USD` daily time series. It validates positive OHLC values and OHLC consistency, rejects malformed bars, writes in batches, and uses the market bar natural key for idempotent upserts.
+- Adds a dedicated `xauusd-ingestion` Supabase Edge Function using Twelve Data's `XAU/USD` daily time series. Its validation helper rejects malformed dates, non-positive/non-finite prices and inconsistent OHLC ranges; tests cover valid rows, invalid values, calendar dates and volume edge cases. The function writes in batches and uses the market bar natural key for idempotent upserts.
+- Adds `macro.observations_as_of(timestamptz)` as an additive SQL migration. It excludes observations whose release, revision-release, first-seen or retrieval timestamps are later than the decision time.
+- Changes the generic `economic-ingestion` endpoint to authenticate institutional users and return an explicit `501 PROVIDER_ADAPTER_NOT_CONFIGURED` until an auditable provider adapter exists, rather than reporting a false success.
 - The XAUUSD function is deliberately **not deployed** by this change. It fails closed until the XAUUSD instrument, active Twelve Data provider registry entry, and `TWELVE_DATA_API_KEY` secret are configured.
 
 ## XAUUSD deployment prerequisites
@@ -39,7 +41,9 @@ For each stored observation/revision preserve at least:
 
 ## Current limitations
 
+- GitHub Actions run #61 passed: Deno type-checks, the XAUUSD validation tests, dependency installation and the Vite production build.
+- The SQL migration has not been applied to Supabase and no Edge Function has been deployed. The XAUUSD provider has not yet been configured or tested against live provider data.
 - This PR does not modify production data and does not deploy any Edge Function.
-- The generic `economic-ingestion` endpoint remains an acknowledgement-only placeholder; the revision-aware macro pipeline is not complete.
+- The macro ingestion pipeline is not complete. BLS ingestion currently stores provider observations with `point_in_time_ready=false`; authoritative release timestamps and revision history must be populated from validated release evidence before those observations become model-eligible.
 - The current repository build workflow does not validate Deno Edge Functions, and npm dependencies are not yet reproducibly locked. Add Deno checks and a committed npm lockfile before treating CI as a complete release gate.
 - Daily precious-metal bars use the provider's date as a UTC-midnight session label. They must not be represented as an exact market-close timestamp without provider-specific evidence.
