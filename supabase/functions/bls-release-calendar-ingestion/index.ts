@@ -49,10 +49,12 @@ Deno.serve(async (req: Request) => {
     }
 
     const retrievedAt = new Date().toISOString();
+    const nowMs = Date.now();
     const events = parseEvents(ics);
     const candidates = [];
     const rejected: Array<{ summary: string; reason: string; source_datetime?: string | null; source_timezone?: string | null }> = [];
     let unsupportedEventsSkipped = 0;
+    let historicalEventsSkipped = 0;
     for (const e of events) {
       const summary = e.SUMMARY ?? "";
       const classification = classify(summary);
@@ -65,6 +67,10 @@ Deno.serve(async (req: Request) => {
         rejected.push({ summary, reason: "unparseable or invalid scheduled time", source_datetime: e.DTSTART, source_timezone: timezone });
         continue;
       }
+      // The ICS includes old events. Historical scheduled releases belong in release/observation
+      // history, not in the forward-looking provider release calendar.
+      if (Date.parse(scheduled) < nowMs) { historicalEventsSkipped++; continue; }
+
       const explicitPeriod = getPeriod(summary);
       const period = explicitPeriod ?? getPeriod(summary, startValue, classification.periodLagMonths);
       if (!period) {
@@ -104,6 +110,8 @@ Deno.serve(async (req: Request) => {
         events_seen: events.length,
         records_seen: 0,
         records_rejected: rejected.length,
+        records_skipped: unsupportedEventsSkipped,
+        historical_events_skipped: historicalEventsSkipped,
         rejected: rejected.slice(0, 20),
         source_url: BLS_ICS_URL,
         records_written: 0,
@@ -130,6 +138,7 @@ Deno.serve(async (req: Request) => {
       records_written: insertedOrUpdated,
       records_skipped: unsupportedEventsSkipped,
       unsupported_events_skipped: unsupportedEventsSkipped,
+      historical_events_skipped: historicalEventsSkipped,
       rejected: rejected.slice(0, 20),
       preview: rows.slice(0, 20),
     });
