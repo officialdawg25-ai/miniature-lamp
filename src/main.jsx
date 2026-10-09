@@ -10,7 +10,7 @@ function Status({label,value,tone}){return <div className="statusitem"><small>{l
 function Metric({label,value,sub,note,icon:Icon}){return <section className="metric"><div><small>{label}</small><Icon size={16}/></div><strong>{value}</strong><span>{sub}</span><footer>{note}</footer></section>}
 function AuthRoot(){
  const [session,setSession]=useState(null);
- const [authReady,setAuthReady]=useState(false);
+ const [authReady,setAuthReady]=useState(false);\n const [recoveryMode,setRecoveryMode]=useState(false);
  useEffect(()=>{
   if(!supabase){setAuthReady(true);return;}
   let active=true;
@@ -28,6 +28,12 @@ function AuthRoot(){
  if(supabaseConfigError||!supabase)return <div className="auth-screen"><div className="auth-card"><Brand/><div className="auth-message error" role="alert">Sign-in is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in the build environment, then rebuild.</div></div></div>;
  if(!session)return <LoginScreen/>;
  return <DashboardApp session={session} onSignOut={async()=>{const {error}=await supabase.auth.signOut();if(error)console.error("Sign-out failed",error.message);}}/>;
+}
+function PasswordResetScreen(){
+ const [password,setPassword]=useState("");const [confirm,setConfirm]=useState("");
+ const [busy,setBusy]=useState(false);const [done,setDone]=useState(false);const [message,setMessage]=useState("");
+ const submit=async(event)=>{event.preventDefault();setMessage("");if(password.length<8){setMessage("Use a password with at least 8 characters.");return;}if(password!==confirm){setMessage("The passwords do not match.");return;}setBusy(true);try{const {error}=await supabase.auth.updateUser({password});if(error)throw error;setDone(true);}catch{setMessage("Unable to update your password. Request a new recovery email and try again.");}finally{setBusy(false);}};
+ return <div className="auth-screen"><div className="auth-card"><Brand/><div className="auth-kicker">ACCOUNT SECURITY</div><h1>Choose a new password</h1><p className="auth-muted">Set a new password for your Institutional AI account.</p>{done?<><div className="auth-message success" role="status">Your password has been updated. Sign in again to continue.</div><button className="auth-submit" onClick={()=>supabase.auth.signOut()}>Return to sign in</button></>:<form onSubmit={submit} className="auth-form"><label htmlFor="new-password">New password</label><input id="new-password" type="password" autoComplete="new-password" minLength={8} required value={password} onChange={e=>setPassword(e.target.value)}/><label htmlFor="confirm-password">Confirm new password</label><input id="confirm-password" type="password" autoComplete="new-password" minLength={8} required value={confirm} onChange={e=>setConfirm(e.target.value)}/>{message&&<div className="auth-message error" role="alert">{message}</div>}<button className="auth-submit" type="submit" disabled={busy}>{busy?"Updating password…":"Update password"}</button></form>}<div className="auth-security"><ShieldCheck size={15}/><span>Secure account recovery</span></div></div><div className="auth-foot">INSTITUTIONAL AI <span>·</span> MACRO INTELLIGENCE</div></div>;
 }
 function Brand(){return <div className="auth-brand"><div className="mark"><i/><i/><i/></div><div><b>INSTITUTIONAL<span>AI</span></b><small>MACRO INTELLIGENCE</small></div></div>}
 function LoginScreen(){
