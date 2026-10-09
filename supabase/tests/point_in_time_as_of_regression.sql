@@ -1,0 +1,9 @@
+-- Manual regression checks for macro.observations_as_of.
+-- Run only in a disposable test database with validated fixtures; no fixture data is created here.
+-- 1) SELECT count(*) FROM macro.observations_as_of(NULL); must return 0.
+-- 2) For a fixture whose release/revision/retrieval timestamps are <= :as_of,
+--    SELECT count(*) FROM macro.observations_as_of(:as_of) should include it.
+-- 3) For each fixture with authoritative_release_time, revision_release_time,
+--    first_seen_at, or retrieved_at > :as_of, the row must be excluded.
+-- 4) Ensure an earlier revision remains visible before a later revision's
+--    revision_release_time and the later value becomes visible only after that time.
