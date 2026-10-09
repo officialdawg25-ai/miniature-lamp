@@ -19,7 +19,7 @@ Deno.test("parses BLS event metadata and timezone", () => {
   ].join("\r\n"));
   assert.deepEqual(events.length, 1);
   assert.deepEqual(events[0].DTSTART_TZID, "America/New_York");
-  assert.deepEqual(classify(events[0].SUMMARY), { releaseName: "Consumer Price Index", prefix: "CPI" });
+  assert.deepEqual(classify(events[0].SUMMARY), { releaseName: "Consumer Price Index", prefix: "CPI", periodLagMonths: 1 });
   assert.deepEqual(getPeriod(events[0].SUMMARY), "2026-09");
 });
 
