@@ -10,22 +10,33 @@ function Status({label,value,tone}){return <div className="statusitem"><small>{l
 function Metric({label,value,sub,note,icon:Icon}){return <section className="metric"><div><small>{label}</small><Icon size={16}/></div><strong>{value}</strong><span>{sub}</span><footer>{note}</footer></section>}
 function AuthRoot(){
  const [session,setSession]=useState(null);
- const [authReady,setAuthReady]=useState(false);\n const [recoveryMode,setRecoveryMode]=useState(false);
+ const [authReady,setAuthReady]=useState(false);
+ const [recoveryMode,setRecoveryMode]=useState(false);
  useEffect(()=>{
   if(!supabase){setAuthReady(true);return;}
   let active=true;
-  const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,nextSession)=>{
-   if(active){setSession(nextSession);setAuthReady(true);}
+  let authEventSeen=false;
+  const {data:{subscription}}=supabase.auth.onAuthStateChange((event,nextSession)=>{
+   authEventSeen=true;
+   if(active){
+    setSession(nextSession);
+    if(event==="PASSWORD_RECOVERY")setRecoveryMode(true);
+    if(event==="SIGNED_OUT")setRecoveryMode(false);
+    setAuthReady(true);
+   }
   });
   supabase.auth.getSession().then(({data,error})=>{
-   if(!active)return;
+   if(!active||authEventSeen)return;
    if(error)setSession(null);else setSession(data.session);
    setAuthReady(true);
-  }).catch(()=>{if(active){setSession(null);setAuthReady(true);}});
+  }).catch(()=>{
+   if(active&&!authEventSeen){setSession(null);setAuthReady(true);}
+  });
   return ()=>{active=false;subscription.unsubscribe();};
  },[]);
  if(!authReady)return <div className="auth-screen"><div className="auth-card"><Brand/><p className="auth-muted">Restoring secure session…</p></div></div>;
  if(supabaseConfigError||!supabase)return <div className="auth-screen"><div className="auth-card"><Brand/><div className="auth-message error" role="alert">Sign-in is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in the build environment, then rebuild.</div></div></div>;
+ if(recoveryMode&&session)return <PasswordResetScreen/>;
  if(!session)return <LoginScreen/>;
  return <DashboardApp session={session} onSignOut={async()=>{const {error}=await supabase.auth.signOut();if(error)console.error("Sign-out failed",error.message);}}/>;
 }
