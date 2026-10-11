@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseFredObservations, buildUsYieldRows, availableAt, probeLines, parseMofJgbCsv, buildJpYieldRows } from '../supabase/functions/yield-ingestion/yields.ts';
+import { parseFredObservations, buildUsYieldRows, availableAt, probeLines, parseMofJgbCsv, buildJpYieldRows, extractCsvLinks, tailLines } from '../supabase/functions/yield-ingestion/yields.ts';
 
 test('FRED parsing drops missing markers and keeps real values, sorted', () => {
   const obs = parseFredObservations({ observations: [
@@ -82,4 +82,21 @@ test('Japan rows carry market, availability and no real yield', () => {
   assert.equal(rows[0].market_code, 'JP'); assert.equal(rows[0].tenor_years, 10);
   assert.equal(rows[0].real_yield, null); assert.equal(rows[0].ts, '2021-01-04T00:00:00Z');
   assert.equal(rows[0].metadata.available_at, '2021-01-06T00:00:00.000Z');
+});
+
+test('CSV links are extracted, resolved against the page, de-duplicated and limited to https', () => {
+  const html = '<a href="/english/policy/jgbs/reference/interest_rate/historical/jgbcme_all.csv">All</a>'
+    + '<a href="jgbcm.csv?v=2">Current</a><a href=\'jgbcm.csv\'>Dup</a><a href="http://insecure.example/x.csv">no</a>'
+    + '<a href="page.html">not csv</a><a href="mailto:a@b.c">m</a>';
+  const links = extractCsvLinks(html, 'https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/index.htm');
+  assert.deepEqual(links, [
+    'https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/historical/jgbcme_all.csv',
+    'https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/jgbcm.csv',
+  ]);
+  assert.equal(extractCsvLinks(html, 'https://x.example/', 1).length, 1);
+});
+
+test('tailLines returns the last non-empty lines, bounded in width', () => {
+  assert.deepEqual(tailLines('a\nb\n\nc\r\nd\n\n', 2), ['c', 'd']);
+  assert.equal(tailLines('x'.repeat(500), 1, 10)[0].length, 10);
 });
