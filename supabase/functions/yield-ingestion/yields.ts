@@ -77,13 +77,14 @@ export function probeLines(text: string, n = 6, width = 220): string[] {
 // Verified format (probe of jgbcme_all.csv): line 1 is a title, line 2 is "Date,1Y,2Y,...,40Y", data rows are
 // "YYYY/M/D,v1,v2,..." with "-" for a tenor that is not available on that date. Values are percent.
 export const MOF_JGB_URL = "https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/historical/jgbcme_all.csv";
+export const MOF_JGB_CURRENT_URL = "https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/jgbcme.csv";
 export const JP_TENORS = [2, 5, 10] as const;
 export const MAX_PLAUSIBLE_YIELD = 30;
 export const MIN_PLAUSIBLE_YIELD = -2;
 
-export type JgbObs = { date: string; tenor: number; value: number };
+export type JgbObs = { date: string; tenor: number; value: number; file?: string };
 
-export function parseMofJgbCsv(text: string, start: string, tenors: readonly number[] = JP_TENORS): { obs: JgbObs[]; rejected: number; header_found: boolean } {
+export function parseMofJgbCsv(text: string, start: string, tenors: readonly number[] = JP_TENORS, file = "jgbcme_all.csv"): { obs: JgbObs[]; rejected: number; header_found: boolean } {
   const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
   const headerIndex = lines.findIndex((l) => /^Date\s*,/i.test(l.trim()));
   if (headerIndex < 0) throw new Error("MOF_JGB_HEADER_NOT_FOUND");
@@ -99,8 +100,12 @@ export function parseMofJgbCsv(text: string, start: string, tenors: readonly num
   for (const line of lines.slice(headerIndex + 1)) {
     if (!line.trim()) continue;
     const cells = line.split(",").map((c) => c.trim());
-    const m = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(cells[0] ?? "");
-    if (!m) { rejected++; continue; }
+    // Blank separator rows and footnotes (first cell empty or not starting with a digit) are not data and are
+    // skipped silently; only a row that starts like a date but is not a valid calendar date counts as rejected.
+    if (!/^\d/.test(cells[0] ?? "")) continue;
+    const m = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(cells[0]);
+    const valid = m && (() => { const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])); return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3]; })();
+    if (!m || !valid) { rejected++; continue; }
     const date = `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
     if (date < start) continue;
     for (const [tenor, idx] of columnFor) {
@@ -108,7 +113,7 @@ export function parseMofJgbCsv(text: string, start: string, tenors: readonly num
       if (raw === undefined || raw === "" || raw === "-") continue; // not available that day; never turned into zero
       const value = Number(raw);
       if (!Number.isFinite(value) || value < MIN_PLAUSIBLE_YIELD || value > MAX_PLAUSIBLE_YIELD) { rejected++; continue; }
-      obs.push({ date, tenor, value });
+      obs.push({ date, tenor, value, file });
     }
   }
   obs.sort((a, b) => a.date.localeCompare(b.date) || a.tenor - b.tenor);
@@ -120,7 +125,7 @@ export function buildJpYieldRows(obs: JgbObs[], sourceId: string, retrievedAt: s
     market_code: "JP", tenor_years: o.tenor, ts: o.date + "T00:00:00Z", yield: o.value, real_yield: null,
     source_id: sourceId, retrieved_at: retrievedAt,
     metadata: {
-      provider: "Ministry of Finance Japan", dataset: "JGB benchmark yields (jgbcme_all.csv)", units: "percent",
+      provider: "Ministry of Finance Japan", dataset: `JGB benchmark yields (${o.file ?? "jgbcme_all.csv"})`, units: "percent",
       availability_basis: AVAILABILITY_BASIS, available_at: availableAt(o.date), revisions_assumed_none: true,
     },
   }));
@@ -147,4 +152,20 @@ export function extractCsvLinks(html: string, baseUrl: string, max = 12): string
 export function tailLines(text: string, n = 3, width = 200): string[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
   return lines.slice(Math.max(0, lines.length - n)).map((l) => l.slice(0, width));
+}
+
+// Merges the historical file with the current-month file. A date present in both comes from the current file.
+// gap_days is the number of calendar days between the last historical date and the first current date; a value
+// above 5 suggests a month may be missing between the two files.
+export function mergeJgbObs(historical: JgbObs[], current: JgbObs[]): { obs: JgbObs[]; gap_days: number | null; overlap_dates: number } {
+  const byKey = new Map<string, JgbObs>();
+  for (const o of historical) byKey.set(`${o.date}|${o.tenor}`, o);
+  const histDates = new Set(historical.map((o) => o.date));
+  const overlap = new Set<string>();
+  for (const o of current) { if (histDates.has(o.date)) overlap.add(o.date); byKey.set(`${o.date}|${o.tenor}`, o); }
+  const obs = [...byKey.values()].sort((a, b) => a.date.localeCompare(b.date) || a.tenor - b.tenor);
+  const lastHist = historical.length ? historical.reduce((m, o) => (o.date > m ? o.date : m), "") : null;
+  const firstCur = current.length ? current.reduce((m, o) => (o.date < m ? o.date : m), "9999-12-31") : null;
+  const gap_days = lastHist && firstCur ? Math.round((Date.parse(firstCur + "T00:00:00Z") - Date.parse(lastHist + "T00:00:00Z")) / 86400000) : null;
+  return { obs, gap_days, overlap_dates: overlap.size };
 }
