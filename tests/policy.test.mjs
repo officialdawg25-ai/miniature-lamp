@@ -33,3 +33,36 @@ test('days-old counts whole calendar days', () => {
   assert.equal(daysOld('2026-10-01', Date.parse('2026-10-08T12:00:00Z')), 7);
   assert.equal(daysOld('2026-10-08', Date.parse('2026-10-08T00:00:00Z')), 0);
 });
+
+// ---- Bank of Japan daily call rate ------------------------------------------------------------------------------
+import { parseBojDaily, buildBojRows, BOJ_SERIES } from '../supabase/functions/policy-rate-ingestion/policy.ts';
+
+const bojPayload = (dates, values, next) => ({ STATUS: 200, NEXTPOSITION: next, RESULTSET: [{ SERIES_CODE: BOJ_SERIES, VALUES: { SURVEY_DATES: dates, VALUES: values } }] });
+
+test('BoJ parsing reads nested dates and values and skips empty or NA cells', () => {
+  const r = parseBojDaily(bojPayload([20260105, 20260106, 20260107, 20260108, 20260109], [0.2, null, 'NA', 0, '0.25'], null), BOJ_SERIES);
+  assert.deepEqual(r.obs, [{ date: '2026-01-05', value: 0.2 }, { date: '2026-01-08', value: 0 }, { date: '2026-01-09', value: 0.25 }]);
+  assert.equal(r.rejected, 2);
+  assert.equal(r.seriesFound, true);
+  assert.equal(r.nextPosition, null);
+});
+
+test('BoJ parsing also accepts top-level SURVEY_DATES and rejects impossible calendar dates', () => {
+  const p = { RESULTSET: { SERIES_CODE: BOJ_SERIES, SURVEY_DATES: ['20260230', '20260301'], VALUES: [0.1, 0.2] } };
+  const r = parseBojDaily(p, BOJ_SERIES);
+  assert.deepEqual(r.obs, [{ date: '2026-03-01', value: 0.2 }]);
+  assert.equal(r.rejected, 1);
+});
+
+test('BoJ parsing reports a missing series, mismatched arrays and paging', () => {
+  assert.equal(parseBojDaily({ RESULTSET: [] }, BOJ_SERIES).seriesFound, false);
+  assert.equal(parseBojDaily(bojPayload([20260105, 20260106], [0.1], null), BOJ_SERIES).obs.length, 0);
+  assert.equal(parseBojDaily(bojPayload([20260105], [0.1], 251), BOJ_SERIES).nextPosition, 251);
+});
+
+test('BoJ rows become available two days after their date, never earlier', () => {
+  const rows = buildBojRows([{ date: '2026-10-08', value: 0.5 }], 'boj', 'src', '2026-10-11T00:00:00Z');
+  assert.equal(rows[0].available_at, '2026-10-10T00:00:00.000Z');
+  assert.equal(rows[0].rate_lower, null);
+  assert.equal(rows[0].series_id, 'STRDCLUCON');
+});
