@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.0";
 import { alignAsOf, runBacktest, type Num } from "./backtest.ts";
 
-const CODE_VERSION = "backtest-v1";
+const CODE_VERSION = "backtest-v2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -42,62 +42,107 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json().catch(() => ({}));
     const persist = body.persist === true;
-    const costBp = Number.isFinite(Number(body.cost_bp)) ? Math.min(Math.max(Number(body.cost_bp), 0), 20) : 1;
+    const symbol = String(body.symbol ?? "USDJPY").toUpperCase();
+    if (symbol !== "USDJPY" && symbol !== "XAUUSD") return json(400, { ok: false, error: "UNSUPPORTED_SYMBOL", request_id: requestId });
+    const isGold = symbol === "XAUUSD";
+    const defaultCost = isGold ? 2 : 1;
+    const costBp = Number.isFinite(Number(body.cost_bp)) ? Math.min(Math.max(Number(body.cost_bp), 0), 20) : defaultCost;
     const reps = Math.min(Math.max(Math.floor(Number(body.reps ?? 500)), 100), 1000);
     const seed = Math.floor(Number(body.seed ?? 42));
     const start = String(body.start_date ?? "2021-01-01");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return json(400, { ok: false, error: "INVALID_START_DATE", request_id: requestId });
-    const params = { symbol: "USDJPY", start_date: start, cost_bp: costBp, reps, seed, init_train_days: 504, test_block_days: 63, holdout_days: 252, timeframe: "daily" };
+    const params = { symbol, start_date: start, cost_bp: costBp, reps, seed, init_train_days: 504, test_block_days: 63, holdout_days: 252, timeframe: "daily", signal: isGold ? "us_10y_real_yield" : "us_jp_10y_differential" };
 
-    const { data: instrument, error: instrumentError } = await sb.schema("core").from("instruments").select("id").eq("symbol", "USDJPY").eq("active", true).maybeSingle();
+    const { data: instrument, error: instrumentError } = await sb.schema("core").from("instruments").select("id").eq("symbol", symbol).eq("active", true).maybeSingle();
     if (instrumentError || !instrument) return json(500, { ok: false, error: "INSTRUMENT_NOT_FOUND", request_id: requestId });
 
-    const bars = await fetchAll<{ ts: string; close: number | string }>((from, to) =>
-      sb.schema("market").from("price_bars").select("ts,close").eq("instrument_id", instrument.id).eq("timeframe", "daily")
-        .gte("ts", start + "T00:00:00Z").order("ts", { ascending: true }).range(from, to));
-    const yields = await fetchAll<{ as_of: string; diff_10y: number | string | null; us_2y: number | string | null; jp_2y: number | string | null; jp_stale: boolean | null }>((from, to) =>
-      sb.schema("market").from("v_yield_differential_asof").select("as_of,diff_10y,us_2y,jp_2y,jp_stale").order("as_of", { ascending: true }).range(from, to));
+    const num = (v: number | string | null): number | null => (v === null ? null : Number.isFinite(Number(v)) ? Number(v) : null);
+    let datesMs: number[], close: number[], diff10: Num[], carry: number[];
+    let extra: Record<string, unknown> = {};
+    let weekendRowsDropped = 0;
+    let yieldRowCount = 0;
+
+    if (isGold) {
+      // Gold closes live in price_closes. The stored series also has Saturday/Sunday rows, which spot gold does not trade on,
+      // so only Monday-Friday closes are used (matching the FX trading calendar).
+      const all = await fetchAll<{ ts: string; close: number | string }>((from, to) =>
+        sb.schema("market").from("price_closes").select("ts,close").eq("instrument_id", instrument.id).eq("timeframe", "daily")
+          .gte("ts", start + "T00:00:00Z").order("ts", { ascending: true }).range(from, to));
+      const weekdays = all.filter((r) => { const d = new Date(r.ts).getUTCDay(); return d >= 1 && d <= 5; });
+      weekendRowsDropped = all.length - weekdays.length;
+      datesMs = weekdays.map((b) => Date.parse(b.ts));
+      close = weekdays.map((b) => Number(b.close));
+      // Real yield (US 10Y TIPS) is stored on the US 10Y rows. It counts as known only from its stored availability time.
+      const ry = await fetchAll<{ ts: string; real_yield: number | string | null; metadata: { available_at?: string } | null }>((from, to) =>
+        sb.schema("market").from("yield_observations").select("ts,real_yield,metadata").eq("market_code", "US").eq("tenor_years", 10)
+          .not("real_yield", "is", null).order("ts", { ascending: true }).range(from, to));
+      yieldRowCount = ry.length;
+      const feats = ry.map((r) => {
+        const av = r.metadata?.available_at ? Date.parse(r.metadata.available_at) : Date.parse(r.ts) + 2 * 86400000;
+        return { availableAtMs: av, value: num(r.real_yield) as Num };
+      }).sort((x, y) => x.availableAtMs - y.availableAtMs);
+      diff10 = alignAsOf(feats, datesMs);
+      carry = new Array(close.length).fill(0);
+      extra = { weekend_rows_dropped: weekendRowsDropped };
+    } else {
+      const bars = await fetchAll<{ ts: string; close: number | string }>((from, to) =>
+        sb.schema("market").from("price_bars").select("ts,close").eq("instrument_id", instrument.id).eq("timeframe", "daily")
+          .gte("ts", start + "T00:00:00Z").order("ts", { ascending: true }).range(from, to));
+      const yields = await fetchAll<{ as_of: string; diff_10y: number | string | null; us_2y: number | string | null; jp_2y: number | string | null; jp_stale: boolean | null }>((from, to) =>
+        sb.schema("market").from("v_yield_differential_asof").select("as_of,diff_10y,us_2y,jp_2y,jp_stale").order("as_of", { ascending: true }).range(from, to));
+      if (yields.length < 300) return json(422, { ok: false, error: "INSUFFICIENT_YIELD_HISTORY", rows: yields.length, request_id: requestId });
+      yieldRowCount = yields.length;
+      datesMs = bars.map((b) => Date.parse(b.ts));
+      close = bars.map((b) => Number(b.close));
+      // A pairing whose Japan value is stale counts as unavailable (null) rather than being carried forward silently.
+      const diffFeatures = yields.map((r) => ({ availableAtMs: Date.parse(r.as_of), value: r.jp_stale ? null : num(r.diff_10y) as Num }));
+      // Carry proxy: per-day interest-rate differential (US 2Y - Japan 2Y) earned by a long USDJPY position.
+      const carryFeatures = yields.map((r) => {
+        const us = num(r.us_2y), jp = num(r.jp_2y);
+        return { availableAtMs: Date.parse(r.as_of), value: r.jp_stale || us === null || jp === null ? null : (us - jp) / 100 / 252 };
+      });
+      diff10 = alignAsOf(diffFeatures, datesMs);
+      carry = alignAsOf(carryFeatures, datesMs).map((c) => c ?? 0);
+      extra = { yield_rows_stale: yields.filter((r) => r.jp_stale).length };
+    }
 
     const needed = params.init_train_days + params.test_block_days * 2 + params.holdout_days + 1;
-    if (bars.length < needed) return json(422, { ok: false, error: "INSUFFICIENT_PRICE_HISTORY", bars: bars.length, needed, request_id: requestId });
-    if (yields.length < 300) return json(422, { ok: false, error: "INSUFFICIENT_YIELD_HISTORY", rows: yields.length, request_id: requestId });
-
-    const datesMs = bars.map((b) => Date.parse(b.ts));
-    const close = bars.map((b) => Number(b.close));
+    if (close.length < needed) return json(422, { ok: false, error: "INSUFFICIENT_PRICE_HISTORY", bars: close.length, needed, request_id: requestId });
     if (close.some((c) => !Number.isFinite(c) || c <= 0)) return json(422, { ok: false, error: "INVALID_PRICE_VALUES", request_id: requestId });
 
-    // A pairing whose Japan value is stale counts as unavailable (null) rather than being carried forward silently.
-    const num = (v: number | string | null): number | null => (v === null ? null : Number.isFinite(Number(v)) ? Number(v) : null);
-    const diffFeatures = yields.map((r) => ({ availableAtMs: Date.parse(r.as_of), value: r.jp_stale ? null : num(r.diff_10y) as Num }));
-    // Carry proxy: per-day interest-rate differential (US 2Y - Japan 2Y) earned by a long USDJPY position.
-    const carryFeatures = yields.map((r) => {
-      const us = num(r.us_2y), jp = num(r.jp_2y);
-      return { availableAtMs: Date.parse(r.as_of), value: r.jp_stale || us === null || jp === null ? null : (us - jp) / 100 / 252 };
-    });
-    const diff10 = alignAsOf(diffFeatures, datesMs);
-    const carry = alignAsOf(carryFeatures, datesMs).map((c) => c ?? 0);
-
-    const result = runBacktest({ close, diff10 }, carry, { initTrain: params.init_train_days, testBlock: params.test_block_days, holdout: params.holdout_days, costBp, reps, seed });
+    const result = runBacktest({ close, diff10, signalSign: isGold ? -1 : 1 }, carry, { initTrain: params.init_train_days, testBlock: params.test_block_days, holdout: params.holdout_days, costBp, reps, seed, signalName: isGold ? "real_yield" : undefined });
+    const bars = { length: close.length };
+    const yields = { length: yieldRowCount };
 
     const dataSummary = {
-      first_price_date: bars[0].ts.slice(0, 10), last_price_date: bars[bars.length - 1].ts.slice(0, 10), price_days: bars.length,
+      first_price_date: new Date(datesMs[0]).toISOString().slice(0, 10), last_price_date: new Date(datesMs[datesMs.length - 1]).toISOString().slice(0, 10), price_days: bars.length,
       first_close: close[0], last_close: close[close.length - 1], buy_and_hold_price_return: close[close.length - 1] / close[0] - 1,
-      yield_rows: yields.length, yield_rows_stale: yields.filter((r) => r.jp_stale).length,
-      days_with_differential: diff10.filter((v) => v !== null).length,
+      yield_rows: yields.length, ...extra,
+      days_with_signal: diff10.filter((v) => v !== null).length,
       close_checksum: Math.round(close.reduce((a, b) => a + b, 0) * 1000),
     };
-    const caveats = [
+    const common = [
+      "About 5 years of daily data gives low statistical power: only a strong edge can be confirmed. 'No evidence' is not proof that no edge exists.",
+      "This is research output, not a trading signal or a forecast.",
+    ];
+    const caveats = isGold ? [
+      "The sample is one market regime: gold rose strongly, so any long-biased rule benefits. Compare with buy-and-hold, not with zero.",
+      "The rate rules use a fixed prior set in advance: a rising real yield favours a short gold position and a falling one a long. The direction is not fitted.",
+      "Gold has no carry term here, so only the price move is earned. Spot gold carries financing and storage-type costs that are not modelled.",
+      "The stored gold series has weekend rows, which spot gold does not trade on; they are excluded, and the closes are daily values from a single provider, not exchange settlement prices.",
+      "Real-yield availability times are conservative (two days after each date), so results are if anything understated on timing.",
+      ...common,
+    ] : [
       "The sample is one market regime: USDJPY trended strongly higher, so any long-biased rule benefits. Compare with buy-and-hold, not with zero.",
       "Carry is a proxy from US 2Y minus Japan 2Y yields; real swap rates differ and include broker markup.",
       "Yield availability times are conservative (two days after each date); real publication is faster, so results are if anything understated on timing.",
-      "About 5 years of daily data gives low statistical power: only a strong edge can be confirmed. 'No evidence' is not proof that no edge exists.",
-      "This is research output, not a trading signal or a forecast.",
+      ...common,
     ];
 
     let storedId: string | null = null;
     if (persist) {
       const { data: saved, error: saveError } = await sb.schema("intelligence").from("backtest_runs")
-        .insert({ created_by: authData.user.id, code_version: CODE_VERSION, symbol: "USDJPY", params, data_summary: dataSummary, result }).select("id").single();
+        .insert({ created_by: authData.user.id, code_version: CODE_VERSION, symbol, params, data_summary: dataSummary, result }).select("id").single();
       if (saveError) {
         console.error(JSON.stringify({ event: "backtest_store_failed", request_id: requestId, db_code: saveError.code ?? null }));
         return json(500, { ok: false, error: "BACKTEST_STORE_FAILED", database_error_code: saveError.code ?? null, request_id: requestId });

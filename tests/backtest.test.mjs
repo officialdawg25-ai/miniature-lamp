@@ -148,3 +148,45 @@ test('bootstrap interval brackets the point estimate and the timing test is cali
   const p = shiftPermutationP(pos, ret, new Array(800).fill(0), 0, 300, 2);
   assert.ok(p > 0.01);
 });
+
+// ---- gold / inverse-signal support -------------------------------------------------------------------------------
+test('signalSign -1 flips rate-signal positions and leaves momentum unchanged', () => {
+  const s = market(21); const neg = { ...s, signalSign: -1 };
+  for (const c of CONFIGS) {
+    const a = positionsFor(c, s), b = positionsFor(c, neg);
+    for (let t = 0; t < a.length; t++) {
+      if (c.family === 'momentum') assert.equal(a[t], b[t]);
+      else assert.equal(b[t], -a[t] || 0);
+    }
+  }
+});
+
+test('signalSign defaults to +1 (USDJPY behaviour is unchanged)', () => {
+  const s = market(22);
+  for (const c of CONFIGS) assert.deepEqual(positionsFor(c, s), positionsFor(c, { ...s, signalSign: 1 }));
+});
+
+test('signalName only relabels outputs; numbers are identical', () => {
+  const s = market(23);
+  const carry = new Array(s.close.length).fill(0);
+  const a = runBacktest(s, carry, OPTS), b = runBacktest(s, carry, { ...OPTS, signalName: 'real_yield' });
+  assert.equal(a.oos.sharpe, b.oos.sharpe);
+  assert.deepEqual(a.fixed_configs_in_sample.map((c) => c.sharpe), b.fixed_configs_in_sample.map((c) => c.sharpe));
+  assert.ok(b.fixed_configs_in_sample.some((c) => c.id === 'real_yield_change_20'));
+  assert.ok(b.fixed_configs_in_sample.every((c) => !c.id.startsWith('diff_')));
+  assert.ok(Object.keys(b.selections).every((k) => !k.startsWith('diff_')));
+});
+
+test('an inverse relationship (higher signal -> lower price) is only found with the matching prior', () => {
+  let right = 0, wrong = 0; const seeds = 6;
+  for (let sd = 1; sd <= seeds; sd++) {
+    const s = market(300 + sd, 1500, -0.0007);            // planted: returns follow minus the sign of the 20-day change
+    const carry = new Array(s.close.length).fill(0);
+    const ok = runBacktest({ ...s, signalSign: -1 }, carry, { ...OPTS, seed: sd });
+    const bad = runBacktest({ ...s, signalSign: 1 }, carry, { ...OPTS, seed: sd });
+    if (ok.oos.sharpe > 0.5) right++;
+    if (bad.oos.sharpe > 0.5) wrong++;
+  }
+  assert.ok(right >= 4, `matching prior found the edge in ${right}/${seeds}`);
+  assert.ok(wrong <= 1, `wrong prior still looked good in ${wrong}/${seeds}`);
+});

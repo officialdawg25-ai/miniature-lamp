@@ -54,7 +54,10 @@ export const CONFIGS: Config[] = [
   ...[20, 60, 120].map((p) => ({ id: `momentum_${p}`, family: "momentum" as const, param: p })),
 ];
 
-export type Series = { close: number[]; diff10: Num[] };
+// `diff10` is the rate-based signal series (for USDJPY the US-Japan 10Y differential; for XAUUSD the US 10Y real yield).
+// `signalSign` is the economic prior for the signal's direction, fixed in advance and never fitted: +1 when a higher signal
+// should favour a long position (USDJPY and the rate differential), -1 when it should favour a short (gold and real yields).
+export type Series = { close: number[]; diff10: Num[]; signalSign?: 1 | -1 };
 
 // Position in {-1, 0, +1} for every day: +1 long USDJPY, -1 short, 0 when the feature is not yet available.
 export function positionsFor(cfg: Config, s: Series): number[] {
@@ -62,7 +65,8 @@ export function positionsFor(cfg: Config, s: Series): number[] {
     cfg.family === "diff_level" ? rollingZ(s.diff10, cfg.param)
     : cfg.family === "diff_change" ? changeOver(s.diff10, cfg.param)
     : momentum(s.close, cfg.param);
-  return feature.map((f) => (f === null || f === 0 ? 0 : f > 0 ? 1 : -1));
+  const sign = cfg.family === "momentum" ? 1 : (s.signalSign ?? 1);
+  return feature.map((f) => (f === null || f === 0 ? 0 : (f > 0 ? 1 : -1) * sign));
 }
 
 export function forwardReturns(close: number[]): number[] {
@@ -209,7 +213,7 @@ export function deflatedSharpe(sharpeAnnual: number, trials: number, nObs: numbe
 }
 
 // ---- full pipeline --------------------------------------------------------------------------------------------
-export type RunOptions = { initTrain: number; testBlock: number; holdout: number; costBp: number; reps: number; seed: number; bootstrapBlock?: number };
+export type RunOptions = { initTrain: number; testBlock: number; holdout: number; costBp: number; reps: number; seed: number; bootstrapBlock?: number; signalName?: string };
 
 export type RunResult = {
   days: number; oos_days: number; holdout_days: number; trials: number;
@@ -247,10 +251,12 @@ export function runBacktest(series: Series, carryDaily: number[], opts: RunOptio
   const bhNet = simulate(ones, ret, carry, opts.costBp);
   const bh = { oos: metrics(bhNet.slice(a, b)), holdout: metrics(bhNet.slice(b)), full: metrics(bhNet) };
 
+  // Display names only: rate-signal rules are labelled with the signal actually used (e.g. real_yield_change_20).
+  const label = (id: string) => (opts.signalName ? id.replace(/^diff_/, opts.signalName + "_") : id);
   const selections: Record<string, number> = {};
-  for (const s of wf.selections) selections[s.cfg] = (selections[s.cfg] ?? 0) + 1;
+  for (const s of wf.selections) selections[label(s.cfg)] = (selections[label(s.cfg)] ?? 0) + 1;
   const sens = [0, 1, 2, 5].map((c) => ({ cost_bp: c, oos_sharpe: metrics(simulate(wf.stitched, ret, carry, c).slice(a, b)).sharpe }));
-  const fixed = CONFIGS.map((c) => { const mm = metrics(simulate(positions[c.id], ret, carry, opts.costBp)); return { id: c.id, sharpe: mm.sharpe, ann_return: mm.ann_return }; });
+  const fixed = CONFIGS.map((c) => { const mm = metrics(simulate(positions[c.id], ret, carry, opts.costBp)); return { id: label(c.id), sharpe: mm.sharpe, ann_return: mm.ann_return }; });
 
   const holdoutM = metrics(holdNet);
   const reasons: string[] = [];
@@ -262,7 +268,7 @@ export function runBacktest(series: Series, carryDaily: number[], opts: RunOptio
   return {
     days: n, oos_days: oosNet.length, holdout_days: holdNet.length, trials: CONFIGS.length,
     oos: { ...m, sharpe_ci: ci, permutation_p: p, deflated_sharpe: dsr, pct_time_long: oosPos.filter((x) => x > 0).length / Math.max(oosPos.length, 1), turnover_per_year: turnover / Math.max(years, 1e-9) },
-    holdout: { ...holdoutM, cfg: wf.holdoutCfg },
+    holdout: { ...holdoutM, cfg: wf.holdoutCfg === null ? null : label(wf.holdoutCfg) },
     buy_and_hold: bh, selections, cost_sensitivity: sens, fixed_configs_in_sample: fixed,
     verdict: { has_evidence: reasons.length === 0, reasons },
   };
