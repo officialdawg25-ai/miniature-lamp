@@ -7,7 +7,8 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test tests/vintage.test.mjs tests/yields.test.mjs"
+    "test": "node --test tests/vintage.test.mjs tests/yields.test.mjs",
+    "lint": "npx -y eslint@9 src"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
