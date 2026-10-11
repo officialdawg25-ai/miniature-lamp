@@ -51,6 +51,13 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json().catch(() => ({}));
     const dryRun = body.dry_run !== false;
+    if (body.action === "promote_availability") {
+      // Records BLS-scheduled availability on already-imported vintage rows. Never marks rows point-in-time eligible.
+      const { data: promoted, error: promoteError } = await sb.schema("macro")
+        .rpc("promote_alfred_scheduled_availability", { p_dry_run: dryRun });
+      if (promoteError) return json(500, { ok: false, status: "failed", error: "AVAILABILITY_PROMOTION_FAILED", database_error_code: promoteError.code ?? null, request_id: requestId });
+      return json(200, { ok: true, status: "completed", action: "promote_availability", request_id: requestId, ...promoted });
+    }
     const startYear = Number(body.start_year ?? 2021);
     const endYear = Number(body.end_year ?? new Date().getUTCFullYear());
     const requestedCodes = Array.isArray(body.indicator_codes) && body.indicator_codes.length
