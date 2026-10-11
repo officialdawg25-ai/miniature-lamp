@@ -211,18 +211,19 @@ Deno.serve(async (req: Request) => {
       if (!factor) { vintageSkipped.push({ indicator: code, reason: "UNSUPPORTED_FACTOR_CATEGORY" }); continue; }
       if (bias === "") { vintageSkipped.push({ indicator: code, reason: "DIRECTIONAL_BIAS_NOT_CONFIGURED" }); continue; }
       const { data: windows, error: windowError } = await supabase.schema("macro")
-        .rpc("pit_event_windows", { p_indicator_code: code, p_window: 14 });
+        .rpc("pit_event_windows", { p_indicator_code: code, p_window: 18 });
       if (windowError || !windows) { vintageSkipped.push({ indicator: code, reason: "WINDOW_LOOKUP_FAILED", db_code: windowError?.code ?? null }); continue; }
       const isInflationIndex = factor === "inflation" && /level|index/i.test(indicator.transformation ?? "");
       const component: ComponentScore[] = [];
       let insufficient = 0;
-      for (const w of windows as { as_of: string; vals: (number | string)[] }[]) {
-        const result = scoreWindow(w.vals.map(Number), bias, isInflationIndex);
+      const skipReasons: Record<string, number> = {};
+      for (const w of windows as { as_of: string; observation_dates: string[]; vals: (number | string)[] }[]) {
+        const result = scoreWindow(w.observation_dates, w.vals.map(Number), bias, isInflationIndex);
         if (result.ok) component.push({ indicator: code, as_of: new Date(w.as_of).toISOString(), score: result.score, zscore: result.zscore, history_count: result.history_count });
-        else insufficient++;
+        else { insufficient++; skipReasons[result.reason] = (skipReasons[result.reason] ?? 0) + 1; }
       }
       if (!component.length) {
-        vintageSkipped.push({ indicator: code, reason: "INSUFFICIENT_POINT_IN_TIME_HISTORY", release_events: (windows as unknown[]).length, events_skipped: insufficient, minimum_observations: MIN_HISTORY + (isInflationIndex ? 2 : 1) });
+        vintageSkipped.push({ indicator: code, reason: "INSUFFICIENT_POINT_IN_TIME_HISTORY", release_events: (windows as unknown[]).length, events_skipped: insufficient, minimum_observations: MIN_HISTORY + (isInflationIndex ? 2 : 1), skip_reasons: skipReasons });
         continue;
       }
       const key = indicator.currency_code + "|" + factor;

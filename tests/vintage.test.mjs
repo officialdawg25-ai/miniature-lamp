@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { scoreWindow, buildFactorSeries, factorFor, normalizeBias, MIN_HISTORY } from '../supabase/functions/macro-factor-engine/vintage.ts';
+import { scoreWindow as scoreRaw, buildFactorSeries, factorFor, normalizeBias, MIN_HISTORY } from '../supabase/functions/macro-factor-engine/vintage.ts';
 
+// Test helper: consecutive month-start dates ending in 2025-09, so the dates are real months.
+const monthDates = (n, endY = 2025, endM = 9) => Array.from({ length: n }, (_, i) => { const idx = endY * 12 + (endM - 1) - (n - 1 - i); return `${Math.floor(idx / 12)}-${String(idx % 12 + 1).padStart(2, '0')}-01`; });
+const scoreWindow = (vals, bias, idx) => scoreRaw(monthDates(vals.length), vals, bias, idx);
 const ramp = (n, start = 3.5, step = 0.05) => Array.from({ length: n }, (_, i) => start + i * step);
 
 test('factor and bias mapping', () => {
@@ -67,4 +70,33 @@ test('factor series uses latest score at or before each event and drops stale co
   const stale = buildFactorSeries([[{ indicator: 'X', as_of: '2024-01-01T00:00:00Z', score: 80, zscore: 1, history_count: 20 }],
                                    [{ indicator: 'Y', as_of: '2024-06-01T00:00:00Z', score: 20, zscore: -1, history_count: 20 }]]);
   assert.equal(stale[1].score, 20);             // X is older than 100 days and ignored
+});
+
+test('a missing month never becomes a two-month change for index levels', () => {
+  // Feb-Sep 2025, then Nov 2025-Jun 2026: October 2025 is absent.
+  const dates = [...monthDates(8, 2025, 9), ...monthDates(8, 2026, 6)];
+  assert.equal(dates.includes('2025-10-01'), false);
+  let level = 300;
+  const levels = dates.map((_, i) => (level *= 1 + 0.002 + (i % 3) * 0.0005));
+  const r = scoreRaw(dates, levels, 'positive', true);
+  assert.equal(r.ok, true);
+  // 15 adjacent pairs minus the single pair that spans the gap.
+  assert.equal(r.history_count, 14);
+});
+
+test('the first month after a gap is not scored for index levels', () => {
+  const before = monthDates(16, 2025, 9);
+  const after = ['2025-11-01'];
+  const dates = [...before, ...after];
+  const levels = dates.map((_, i) => 300 * 1.002 ** i + (i % 2) * 0.3);
+  const r = scoreRaw(dates, levels, 'positive', true);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'LATEST_OBSERVATION_NOT_COMPARABLE');
+});
+
+test('plain level series tolerate a missing month', () => {
+  const dates = [...monthDates(8, 2025, 9), ...monthDates(8, 2026, 6)];
+  const vals = dates.map((_, i) => 4 + (i % 5) * 0.1);
+  const r = scoreRaw(dates, vals, 'inverse', false);
+  assert.equal(r.ok, true);
 });
