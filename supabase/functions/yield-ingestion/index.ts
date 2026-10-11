@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.0";
-import { AVAILABILITY_BASIS, MOF_JGB_URL, US_SERIES, buildJpYieldRows, buildUsYieldRows, parseFredObservations, parseMofJgbCsv, probeLines, type Obs } from "./yields.ts";
+import { AVAILABILITY_BASIS, MOF_JGB_URL, US_SERIES, buildJpYieldRows, buildUsYieldRows, extractCsvLinks, parseFredObservations, parseMofJgbCsv, probeLines, tailLines, type Obs } from "./yields.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -60,6 +60,43 @@ Deno.serve(async (req: Request) => {
         }
       }
       return json(200, { ok: true, status: "completed", action: "probe_jgb", request_id: requestId, stored: false, results });
+    }
+
+    if (body.action === "probe_links") {
+      // Source discovery only: reads the Ministry of Finance interest-rate pages, lists the CSV files they link to,
+      // and reports each file's freshness (last-modified header, header row and last lines). Nothing is stored.
+      const PAGES = [
+        "https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/index.htm",
+        "https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/",
+      ];
+      const pages: Record<string, unknown>[] = [];
+      const csvLinks: string[] = [];
+      for (const page of PAGES) {
+        try {
+          const response = await fetch(page, { signal: AbortSignal.timeout(15000) });
+          const html = response.ok ? await response.text() : "";
+          const links = response.ok ? extractCsvLinks(html, page) : [];
+          for (const l of links) if (!csvLinks.includes(l)) csvLinks.push(l);
+          pages.push({ page, http_status: response.status, csv_links_found: links.length });
+        } catch (e) {
+          pages.push({ page, error: e instanceof Error ? e.message.slice(0, 120) : "FETCH_FAILED" });
+        }
+      }
+      const files: Record<string, unknown>[] = [];
+      for (const url of csvLinks.slice(0, 8)) {
+        try {
+          const response = await fetch(url, { signal: AbortSignal.timeout(20000) });
+          const text = response.ok ? new TextDecoder("utf-8", { fatal: false }).decode(await response.arrayBuffer()) : "";
+          files.push({
+            url, http_status: response.status, last_modified: response.headers.get("last-modified"),
+            content_type: response.headers.get("content-type"), characters: text.length,
+            first_lines: response.ok ? probeLines(text, 3) : [], last_lines: response.ok ? tailLines(text, 3) : [],
+          });
+        } catch (e) {
+          files.push({ url, error: e instanceof Error ? e.message.slice(0, 120) : "FETCH_FAILED" });
+        }
+      }
+      return json(200, { ok: true, status: "completed", action: "probe_links", request_id: requestId, stored: false, pages, files });
     }
 
     const dryRun = body.dry_run !== false;

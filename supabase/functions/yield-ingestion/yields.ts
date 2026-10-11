@@ -125,3 +125,26 @@ export function buildJpYieldRows(obs: JgbObs[], sourceId: string, retrievedAt: s
     },
   }));
 }
+
+// ---- Source discovery helpers (used by probe_links) ---------------------------------------------------------
+// Lists the CSV files an HTML page links to, resolved against the page URL. Only https links are returned.
+export function extractCsvLinks(html: string, baseUrl: string, max = 12): string[] {
+  const out: string[] = [];
+  const re = /href\s*=\s*["']([^"'#]+\.csv)(?:\?[^"']*)?["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    try {
+      const url = new URL(m[1], baseUrl);
+      if (url.protocol !== "https:") continue;
+      const href = url.toString();
+      if (!out.includes(href)) out.push(href);
+    } catch { /* ignore malformed hrefs */ }
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+export function tailLines(text: string, n = 3, width = 200): string[] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  return lines.slice(Math.max(0, lines.length - n)).map((l) => l.slice(0, width));
+}
