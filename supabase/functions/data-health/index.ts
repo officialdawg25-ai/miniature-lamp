@@ -50,7 +50,7 @@ Deno.serve(async (req: Request) => {
     if (accessError) return json({ error: "Authorization check failed" }, 500);
     if (!accessRow) return json({ error: "Institutional access not approved" }, 403);
 
-    const [instrumentsRes, barsCountRes, closesCountRes, obsRes, releasesCountRes, pitCountRes, indicatorsRes, jobsRes, runsRes, scoresRes, ...datasetRes] = await Promise.all([
+    const [instrumentsRes, barsCountRes, closesCountRes, obsRes, releasesCountRes, pitCountRes, indicatorsRes, jobsRes, runsRes, scoresRes, yieldSummaryRes, ...datasetRes] = await Promise.all([
       admin.schema("core").from("instruments").select("id,symbol,name").eq("active", true).order("symbol"),
       admin.schema("market").from("price_bars").select("instrument_id", { count: "exact", head: true }),
       admin.schema("market").from("price_closes").select("instrument_id", { count: "exact", head: true }),
@@ -67,6 +67,7 @@ Deno.serve(async (req: Request) => {
       admin.schema("intelligence").from("pair_scores")
         .select("instrument_id,as_of,technical_score,composite_score,fundamental_score,explanation")
         .order("as_of", { ascending: false }).limit(200),
+      admin.schema("market").rpc("yield_differential_summary"),
       ...DATASETS.map(([schema, table]) => admin.schema(schema).from(table).select("*", { count: "exact", head: true })),
     ]);
 
@@ -121,7 +122,7 @@ Deno.serve(async (req: Request) => {
     const errors = [
       ["instruments", instrumentsRes.error], ["price_bars_count", barsCountRes.error], ["price_closes_count", closesCountRes.error],
       ["provider_observations", obsRes.error], ["economic_releases_count", releasesCountRes.error], ["point_in_time_count", pitCountRes.error],
-      ["economic_indicators", indicatorsRes.error], ["ingestion_jobs", jobsRes.error], ["ingestion_runs", runsRes.error], ["pair_scores", scoresRes.error],
+      ["economic_indicators", indicatorsRes.error], ["ingestion_jobs", jobsRes.error], ["ingestion_runs", runsRes.error], ["pair_scores", scoresRes.error], ["yield_differential_summary", yieldSummaryRes.error],
     ].filter(([, error]) => error).map(([source, error]) => ({ source, message: (error as Error).message }));
     for (const d of datasets) if (d.error) errors.push({ source: "dataset:" + d.dataset, message: d.error });
     for (const row of instrumentStats) errors.push(...row._errors);
@@ -192,6 +193,7 @@ Deno.serve(async (req: Request) => {
           : "Only observations explicitly marked point-in-time ready are eligible for factor scoring.",
       },
       datasets,
+      yields: yieldSummaryRes.error ? null : yieldSummaryRes.data,
       intelligence: {
         regime_states: datasets.find((d) => d.dataset === "intelligence.regime_states")?.rows ?? 0,
         pair_scores: datasets.find((d) => d.dataset === "intelligence.pair_scores")?.rows ?? 0,
