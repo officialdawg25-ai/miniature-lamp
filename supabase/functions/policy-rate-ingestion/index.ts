@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.0";
-import { AVAILABILITY_BASIS, FED_SERIES, buildFedRows, daysOld, parseFredObservations, rateChanges, type Obs } from "./policy.ts";
+import { AVAILABILITY_BASIS, BOJ_AVAILABILITY_BASIS, BOJ_SERIES, FED_SERIES, buildBojRows, buildFedRows, daysOld, parseBojDaily, parseFredObservations, rateChanges, type Obs } from "./policy.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -32,6 +32,12 @@ async function fredSeriesInfo(seriesId: string) {
   const s = payload?.seriess?.[0];
   if (!response.ok || !s) return { series_id: seriesId, http_status: response.status, found: false, error: String(payload?.error_message ?? "NOT_FOUND").slice(0, 100) };
   return { series_id: seriesId, found: true, title: s.title, frequency: s.frequency, units: s.units, observation_start: s.observation_start, observation_end: s.observation_end, last_updated: s.last_updated, notes_excerpt: String(s.notes ?? "").slice(0, 240) };
+}
+
+function lastMonthlyAverages(obs: Obs[], n: number) {
+  const m = new Map<string, { sum: number; count: number }>();
+  for (const o of obs) { const k = o.date.slice(0, 7); const e = m.get(k) ?? { sum: 0, count: 0 }; e.sum += o.value; e.count++; m.set(k, e); }
+  return [...m.entries()].slice(-n).map(([month, e]) => ({ month, average: Math.round((e.sum / e.count) * 1000) / 1000, days: e.count }));
 }
 
 Deno.serve(async (req: Request) => {
@@ -77,10 +83,71 @@ Deno.serve(async (req: Request) => {
     }
 
     const market = String(body.market ?? "US").toUpperCase();
-    if (market !== "US") return json(400, { ok: false, error: "UNSUPPORTED_MARKET", supported: ["US"], note: "Japan is added after the source probe.", request_id: requestId });
+    if (market !== "US" && market !== "JP") return json(400, { ok: false, error: "UNSUPPORTED_MARKET", supported: ["US", "JP"], request_id: requestId });
     const dryRun = body.dry_run !== false;
     const start = String(body.start_date ?? "2020-01-01");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return json(400, { ok: false, error: "INVALID_START_DATE", request_id: requestId });
+
+    if (market === "JP") {
+      const { data: bojSource, error: bojSourceError } = await sb.schema("core").from("data_sources").select("id").eq("name", "Bank of Japan").eq("active", true).maybeSingle();
+      if (bojSourceError || !bojSource) return json(500, { ok: false, error: "BOJ_SOURCE_NOT_REGISTERED", request_id: requestId });
+      const { data: boj, error: bojError } = await sb.schema("macro").from("central_banks").select("id").eq("code", "BOJ").eq("active", true).maybeSingle();
+      if (bojError || !boj) return json(500, { ok: false, error: "CENTRAL_BANK_NOT_FOUND", code: "BOJ", request_id: requestId });
+      const startYm = start.slice(0, 4) + start.slice(5, 7);
+      const endYm = new Date().toISOString().slice(0, 4) + new Date().toISOString().slice(5, 7);
+      const all: Obs[] = [];
+      let rejected = 0, position = 1, pages = 0;
+      let shape: Record<string, unknown> | null = null;
+      while (position && pages < 20) {
+        const url = new URL("https://www.stat-search.boj.or.jp/api/v1/getDataCode");
+        url.searchParams.set("format", "json"); url.searchParams.set("lang", "en"); url.searchParams.set("db", "FM01");
+        url.searchParams.set("startDate", startYm); url.searchParams.set("endDate", endYm); url.searchParams.set("code", BOJ_SERIES);
+        url.searchParams.set("startPosition", String(position));
+        const response = await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(20000) });
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        if (!response.ok || !payload || (payload.STATUS && String(payload.STATUS) !== "200")) {
+          return json(502, { ok: false, error: "BOJ_FETCH_FAILED", http_status: response.status, api_status: payload?.STATUS ?? null, message: String(payload?.MESSAGE ?? "").slice(0, 160), request_id: requestId });
+        }
+        const parsed = parseBojDaily(payload, BOJ_SERIES);
+        if (!parsed.seriesFound || (parsed.obs.length === 0 && pages === 0)) {
+          const rs = payload.RESULTSET as unknown;
+          const first = (Array.isArray(rs) ? rs[0] : rs) as Record<string, unknown> | undefined;
+          shape = { resultset_keys: first ? Object.keys(first) : null, values_type: first ? typeof first.VALUES : null, next_position: payload.NEXTPOSITION ?? null };
+          return json(502, { ok: false, error: "BOJ_RESPONSE_NOT_RECOGNISED", observed_shape: shape, request_id: requestId });
+        }
+        all.push(...parsed.obs); rejected += parsed.rejected; pages++;
+        position = parsed.nextPosition ?? 0;
+      }
+      const merged = [...new Map(all.map((o) => [o.date, o])).values()].sort((a, b) => a.date.localeCompare(b.date));
+      if (merged.length < 200) return json(422, { ok: false, error: "TOO_FEW_BOJ_OBSERVATIONS", observations: merged.length, request_id: requestId });
+      const jpRows = buildBojRows(merged, boj.id, bojSource.id, new Date().toISOString());
+      let jpUpserted = 0;
+      if (!dryRun) {
+        for (let i = 0; i < jpRows.length; i += 500) {
+          const { error: writeError, data: written } = await sb.schema("macro").from("policy_rate_observations")
+            .upsert(jpRows.slice(i, i + 500), { onConflict: "central_bank_id,ts" }).select("id");
+          if (writeError) {
+            console.error(JSON.stringify({ event: "policy_rate_write_failed", request_id: requestId, db_code: writeError.code ?? null }));
+            return json(500, { ok: false, error: "POLICY_RATE_WRITE_FAILED", database_error_code: writeError.code ?? null, rows_upserted_before_failure: jpUpserted, request_id: requestId });
+          }
+          jpUpserted += written?.length ?? 0;
+        }
+      }
+      const latestJp = merged[merged.length - 1];
+      const warningsJp: string[] = [];
+      const ageJp = daysOld(latestJp.date, Date.now());
+      if (ageJp > 7) warningsJp.push(`LATEST_BOJ_DATE_IS_${ageJp}_DAYS_OLD`);
+      if (rejected > 0) warningsJp.push(`${rejected}_CELLS_SKIPPED`);
+      const levels = [...new Set(merged.map((o) => o.value))].length;
+      return json(200, {
+        ok: true, status: "completed", market: "JP", request_id: requestId, dry_run: dryRun, start_date: start,
+        rows_built: jpRows.length, rows_upserted: jpUpserted, pages_fetched: pages, first: merged[0], latest: latestJp, days_since_latest: ageJp,
+        min_rate: Math.min(...merged.map((o) => o.value)), max_rate: Math.max(...merged.map((o) => o.value)), distinct_values: levels,
+        monthly_averages_last_12: lastMonthlyAverages(merged, 12),
+        availability_basis: BOJ_AVAILABILITY_BASIS, warnings: warningsJp,
+        note: "Bank of Japan uncollateralized overnight call rate, daily average (business days only). It is a market rate that tracks the policy rate, not the policy target itself. Empty and 'NA' cells are skipped, never stored as zero.",
+      });
+    }
 
     const { data: source, error: sourceError } = await sb.schema("core").from("data_sources")
       .select("id").eq("name", "Federal Reserve FRED").eq("active", true).maybeSingle();
