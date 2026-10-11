@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseFredObservations, buildUsYieldRows, availableAt, probeLines } from '../supabase/functions/yield-ingestion/yields.ts';
+import { parseFredObservations, buildUsYieldRows, availableAt, probeLines, parseMofJgbCsv, buildJpYieldRows } from '../supabase/functions/yield-ingestion/yields.ts';
 
 test('FRED parsing drops missing markers and keeps real values, sorted', () => {
   const obs = parseFredObservations({ observations: [
@@ -45,4 +45,41 @@ test('probeLines returns a bounded raw preview', () => {
   assert.equal(lines.length, 3);
   assert.equal(lines[0], 'Date,1Y,10Y');
   assert.ok(lines.every((l) => l.length <= 20));
+});
+
+const MOF = [
+  'Interest Rate,,,,,,,,,,,,,,,(Unit : %)',
+  'Date,1Y,2Y,3Y,4Y,5Y,6Y,7Y,8Y,9Y,10Y,15Y,20Y,25Y,30Y,40Y',
+  '1974/9/24,10.327,9.362,8.83,8.515,8.348,8.29,8.24,8.121,8.127,-,-,-,-,-,-',
+  '2021/1/4,-0.13,-0.12,-0.1,-0.09,-0.08,-0.05,-0.02,0.01,0.03,0.025,0.2,0.4,0.6,0.7,0.8',
+  '2021/1/5,-0.13,-0.12,-0.1,-0.09,-0.08,-0.05,-0.02,0.01,0.03,-,0.2,0.4,0.6,0.7,0.8',
+  '2021/1/6,-0.13,-0.12,-0.1',
+  'bad row,1,2,3',
+  '2021/1/7,-0.13,-0.12,-0.1,-0.09,-0.08,-0.05,-0.02,0.01,0.03,95,0.2,0.4,0.6,0.7,0.8',
+].join('\r\n');
+
+test('MOF parsing uses the verified layout, converts dates, skips "-" and filters by start date', () => {
+  const r = parseMofJgbCsv(MOF, '2021-01-01');
+  const d = (date, tenor) => r.obs.find((o) => o.date === date && o.tenor === tenor);
+  assert.equal(r.header_found, true);
+  assert.equal(d('1974-09-24', 2), undefined);        // before the start date
+  assert.equal(d('2021-01-04', 2).value, -0.12);       // negative yields are real and kept
+  assert.equal(d('2021-01-04', 10).value, 0.025);
+  assert.equal(d('2021-01-05', 10), undefined);        // "-" is missing, not zero
+  assert.equal(d('2021-01-05', 5).value, -0.08);
+  assert.equal(d('2021-01-06', 5), undefined);         // short row: missing cells are skipped
+  assert.equal(d('2021-01-07', 10), undefined);        // implausible 95% is rejected
+  assert.equal(r.rejected, 2);                         // "bad row" date + 95% value
+});
+
+test('MOF parsing fails loudly when the layout changes', () => {
+  assert.throws(() => parseMofJgbCsv('<!DOCTYPE html><html></html>', '2021-01-01'), /HEADER_NOT_FOUND/);
+  assert.throws(() => parseMofJgbCsv('Date,1Y,3Y\n2021/1/4,1,2', '2021-01-01'), /TENOR_COLUMN_MISSING_2Y/);
+});
+
+test('Japan rows carry market, availability and no real yield', () => {
+  const rows = buildJpYieldRows([{ date: '2021-01-04', tenor: 10, value: 0.025 }], 'src', '2026-10-11T00:00:00Z');
+  assert.equal(rows[0].market_code, 'JP'); assert.equal(rows[0].tenor_years, 10);
+  assert.equal(rows[0].real_yield, null); assert.equal(rows[0].ts, '2021-01-04T00:00:00Z');
+  assert.equal(rows[0].metadata.available_at, '2021-01-06T00:00:00.000Z');
 });

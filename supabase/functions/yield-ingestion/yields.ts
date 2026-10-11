@@ -72,3 +72,56 @@ export function buildUsYieldRows(
 export function probeLines(text: string, n = 6, width = 220): string[] {
   return text.split(/\r?\n/).filter((l) => l.length > 0).slice(0, n).map((l) => l.slice(0, width));
 }
+
+// ---- Japan Ministry of Finance JGB benchmark yields ---------------------------------------------------------
+// Verified format (probe of jgbcme_all.csv): line 1 is a title, line 2 is "Date,1Y,2Y,...,40Y", data rows are
+// "YYYY/M/D,v1,v2,..." with "-" for a tenor that is not available on that date. Values are percent.
+export const MOF_JGB_URL = "https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/historical/jgbcme_all.csv";
+export const JP_TENORS = [2, 5, 10] as const;
+export const MAX_PLAUSIBLE_YIELD = 30;
+export const MIN_PLAUSIBLE_YIELD = -2;
+
+export type JgbObs = { date: string; tenor: number; value: number };
+
+export function parseMofJgbCsv(text: string, start: string, tenors: readonly number[] = JP_TENORS): { obs: JgbObs[]; rejected: number; header_found: boolean } {
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
+  const headerIndex = lines.findIndex((l) => /^Date\s*,/i.test(l.trim()));
+  if (headerIndex < 0) throw new Error("MOF_JGB_HEADER_NOT_FOUND");
+  const header = lines[headerIndex].split(",").map((h) => h.trim());
+  const columnFor = new Map<number, number>();
+  for (const t of tenors) {
+    const idx = header.indexOf(`${t}Y`);
+    if (idx < 0) throw new Error(`MOF_JGB_TENOR_COLUMN_MISSING_${t}Y`);
+    columnFor.set(t, idx);
+  }
+  const obs: JgbObs[] = [];
+  let rejected = 0;
+  for (const line of lines.slice(headerIndex + 1)) {
+    if (!line.trim()) continue;
+    const cells = line.split(",").map((c) => c.trim());
+    const m = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(cells[0] ?? "");
+    if (!m) { rejected++; continue; }
+    const date = `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+    if (date < start) continue;
+    for (const [tenor, idx] of columnFor) {
+      const raw = cells[idx];
+      if (raw === undefined || raw === "" || raw === "-") continue; // not available that day; never turned into zero
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value < MIN_PLAUSIBLE_YIELD || value > MAX_PLAUSIBLE_YIELD) { rejected++; continue; }
+      obs.push({ date, tenor, value });
+    }
+  }
+  obs.sort((a, b) => a.date.localeCompare(b.date) || a.tenor - b.tenor);
+  return { obs, rejected, header_found: true };
+}
+
+export function buildJpYieldRows(obs: JgbObs[], sourceId: string, retrievedAt: string): YieldRow[] {
+  return obs.map((o) => ({
+    market_code: "JP", tenor_years: o.tenor, ts: o.date + "T00:00:00Z", yield: o.value, real_yield: null,
+    source_id: sourceId, retrieved_at: retrievedAt,
+    metadata: {
+      provider: "Ministry of Finance Japan", dataset: "JGB benchmark yields (jgbcme_all.csv)", units: "percent",
+      availability_basis: AVAILABILITY_BASIS, available_at: availableAt(o.date), revisions_assumed_none: true,
+    },
+  }));
+}

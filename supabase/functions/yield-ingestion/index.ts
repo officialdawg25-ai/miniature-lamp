@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.0";
-import { AVAILABILITY_BASIS, US_SERIES, buildUsYieldRows, parseFredObservations, probeLines, type Obs } from "./yields.ts";
+import { AVAILABILITY_BASIS, MOF_JGB_URL, US_SERIES, buildJpYieldRows, buildUsYieldRows, parseFredObservations, parseMofJgbCsv, probeLines, type Obs } from "./yields.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -66,6 +66,45 @@ Deno.serve(async (req: Request) => {
     const start = String(body.start_date ?? "2021-01-01");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || start < "2000-01-01" || start > new Date().toISOString().slice(0, 10)) {
       return json(400, { ok: false, error: "INVALID_START_DATE", request_id: requestId });
+    }
+
+    if (body.market === "JP") {
+      const { data: jpSource, error: jpSourceError } = await sb.schema("core").from("data_sources")
+        .select("id").eq("name", "Ministry of Finance Japan").eq("active", true).maybeSingle();
+      if (jpSourceError || !jpSource) return json(500, { ok: false, error: "MOF_SOURCE_NOT_REGISTERED", request_id: requestId });
+      const response = await fetch(MOF_JGB_URL, { signal: AbortSignal.timeout(25000) });
+      if (!response.ok) return json(502, { ok: false, error: "MOF_JGB_FETCH_FAILED", http_status: response.status, request_id: requestId });
+      const text = new TextDecoder("utf-8", { fatal: false }).decode(await response.arrayBuffer());
+      let parsed;
+      try { parsed = parseMofJgbCsv(text, start); }
+      catch (e) { return json(502, { ok: false, error: e instanceof Error ? e.message : "MOF_JGB_PARSE_FAILED", request_id: requestId }); }
+      if (!parsed.obs.length) return json(502, { ok: false, error: "MOF_JGB_NO_OBSERVATIONS_IN_RANGE", request_id: requestId });
+      const jpRows = buildJpYieldRows(parsed.obs, jpSource.id, new Date().toISOString());
+      let jpUpserted = 0;
+      if (!dryRun) {
+        for (let i = 0; i < jpRows.length; i += 500) {
+          const { error: writeError, data: written } = await sb.schema("market").from("yield_observations")
+            .upsert(jpRows.slice(i, i + 500), { onConflict: "market_code,tenor_years,ts" }).select("id");
+          if (writeError) {
+            console.error(JSON.stringify({ event: "jp_yield_write_failed", request_id: requestId, db_code: writeError.code ?? null }));
+            return json(500, { ok: false, error: "YIELD_WRITE_FAILED", database_error_code: writeError.code ?? null, rows_upserted_before_failure: jpUpserted, request_id: requestId });
+          }
+          jpUpserted += written?.length ?? 0;
+        }
+      }
+      const byTenor: Record<string, unknown> = {};
+      for (const t of [2, 5, 10]) {
+        const rowsT = parsed.obs.filter((o) => o.tenor === t);
+        byTenor[`${t}Y`] = { observations: rowsT.length, first: rowsT[0]?.date ?? null, latest: rowsT.length ? rowsT[rowsT.length - 1] : null };
+      }
+      const latestDate = parsed.obs[parsed.obs.length - 1].date;
+      return json(200, {
+        ok: true, status: "completed", market: "JP", request_id: requestId, dry_run: dryRun, start_date: start,
+        rows_built: jpRows.length, rows_upserted: jpUpserted, rejected_cells: parsed.rejected,
+        latest_date: latestDate, days_since_latest: Math.floor((Date.now() - Date.parse(latestDate + "T00:00:00Z")) / 86400000),
+        tenors: byTenor, availability_basis: AVAILABILITY_BASIS,
+        note: "Japan JGB benchmark yields (2Y, 5Y, 10Y) from the Ministry of Finance. Missing '-' cells are skipped, never stored as zero.",
+      });
     }
     if (!FRED_API_KEY) return json(503, { ok: false, error: "FRED_API_KEY_NOT_CONFIGURED", required_secret: "FRED_API_KEY", request_id: requestId });
 
