@@ -67,6 +67,8 @@ Deno.serve(async (req: Request) => {
     if (!FRED_API_KEY) return json(503, { ok: false, error: "FRED_API_KEY_NOT_CONFIGURED", required_secret: "FRED_API_KEY", request_id: requestId });
     const since = `${startYear}-01-01`;
     const today = new Date().toISOString().slice(0, 10);
+    const requestedEnd = `${endYear}-12-31`;
+    const through = requestedEnd < today ? requestedEnd : today;
     const diagnostics: Record<string, unknown>[] = [];
     let rowsFetched = 0;
     let rowsUpserted = 0;
@@ -102,7 +104,7 @@ Deno.serve(async (req: Request) => {
         api_key: FRED_API_KEY,
         file_type: "json",
         realtime_start: since,
-        realtime_end: "9999-12-31",
+        realtime_end: through,
         limit: "10000",
         sort_order: "asc",
       }).toString();
@@ -119,7 +121,7 @@ Deno.serve(async (req: Request) => {
       }
       const vintageDates: string[] = [...new Set<string>(vintagesPayload.vintage_dates
         .map((d: unknown) => String(d))
-        .filter((d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= since && d <= today))];
+        .filter((d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= since && d <= through))];
       const { data: calendarRows, error: calendarError } = await sb.schema("macro").from("provider_release_calendars")
         .select("id,release_name,release_key,scheduled_release_time,raw_payload")
         .eq("provider", "BLS")
@@ -134,7 +136,7 @@ Deno.serve(async (req: Request) => {
       // output_type=2 returns one row per observation date with SERIESID_YYYYMMDD columns per vintage.
       const params = new URLSearchParams({
         series_id: config.alfred_series_id, api_key: FRED_API_KEY, file_type: "json", output_type: "2",
-        realtime_start: since, realtime_end: "9999-12-31", observation_start: since,
+        realtime_start: since, realtime_end: through, observation_start: since,
         observation_end: today, limit: "100000", sort_order: "asc",
       });
       const response = await fetch(`https://api.stlouisfed.org/fred/series/observations?${params.toString()}`);
@@ -172,7 +174,7 @@ Deno.serve(async (req: Request) => {
               availability_time_precision: "date_only",
               availability_evidence_url: null,
               availability_validated_at: null,
-              source_observation_url: `https://api.stlouisfed.org/fred/series/observations?series_id=${config.alfred_series_id}&output_type=2&realtime_start=${startYear}-01-01&realtime_end=9999-12-31&observation_start=${startYear}-01-01&observation_end=${today}`,
+              source_observation_url: `https://api.stlouisfed.org/fred/series/observations?series_id=${config.alfred_series_id}&output_type=2&realtime_start=${startYear}-01-01&realtime_end=${through}&observation_start=${startYear}-01-01&observation_end=${today}`,
               bls_archive_url: config.bls_archive_url, matched_bls_calendar_id: matchedId,
               evidence_status: value === null ? "value_missing" : (matchedId ? "calendar_date_matched" : "unmatched_calendar_date"),
               point_in_time_eligible: false,
