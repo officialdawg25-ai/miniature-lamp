@@ -26,3 +26,8 @@ Raw provider observations are explicitly reported as **not point-in-time eligibl
 - The platform remains research/paper-trading only. Live execution is not enabled.
 - A successful Edge Function deployment does not itself deploy the Cloudflare frontend. Confirm the latest GitHub commit has built and the Cloudflare Worker has received the new assets.
 - Automated ingestion scheduling is not enabled by this frontend change. Before configuring recurring jobs, install/verify the required scheduler extensions and add the required project URL/service-role credential to Supabase Vault; do not put those credentials in source control.
+
+## Release identification and data-health source
+
+- The sidebar and footer show the short commit SHA the bundle was built from (`WORKERS_CI_COMMIT_SHA`, `CF_PAGES_COMMIT_SHA`, `GITHUB_SHA`, or local git). Compare it with the latest commit on `main` to confirm which build Cloudflare is serving.
+- `supabase/functions/data-health` is the tracked source of the deployed `data-health` function. It reports exact dataset row counts, the real point-in-time-ready count, indicator coverage, latest per-instrument research scores, recent closes for the instrument charts and recent ingestion runs. Deploying it is a separate step from the Cloudflare frontend build.
