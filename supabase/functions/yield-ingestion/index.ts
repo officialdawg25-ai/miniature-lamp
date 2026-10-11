@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.0";
-import { AVAILABILITY_BASIS, MOF_JGB_URL, US_SERIES, buildJpYieldRows, buildUsYieldRows, extractCsvLinks, parseFredObservations, parseMofJgbCsv, probeLines, tailLines, type Obs } from "./yields.ts";
+import { AVAILABILITY_BASIS, MOF_JGB_CURRENT_URL, MOF_JGB_URL, US_SERIES, buildJpYieldRows, buildUsYieldRows, extractCsvLinks, mergeJgbObs, parseFredObservations, parseMofJgbCsv, probeLines, tailLines, type JgbObs, type Obs } from "./yields.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -109,14 +109,39 @@ Deno.serve(async (req: Request) => {
       const { data: jpSource, error: jpSourceError } = await sb.schema("core").from("data_sources")
         .select("id").eq("name", "Ministry of Finance Japan").eq("active", true).maybeSingle();
       if (jpSourceError || !jpSource) return json(500, { ok: false, error: "MOF_SOURCE_NOT_REGISTERED", request_id: requestId });
+
+      // 1) Historical file (required): complete history up to the end of the last published month.
       const response = await fetch(MOF_JGB_URL, { signal: AbortSignal.timeout(25000) });
       if (!response.ok) return json(502, { ok: false, error: "MOF_JGB_FETCH_FAILED", http_status: response.status, request_id: requestId });
       const text = new TextDecoder("utf-8", { fatal: false }).decode(await response.arrayBuffer());
-      let parsed;
-      try { parsed = parseMofJgbCsv(text, start); }
+      let historical;
+      try { historical = parseMofJgbCsv(text, start, undefined, "jgbcme_all.csv"); }
       catch (e) { return json(502, { ok: false, error: e instanceof Error ? e.message : "MOF_JGB_PARSE_FAILED", request_id: requestId }); }
-      if (!parsed.obs.length) return json(502, { ok: false, error: "MOF_JGB_NO_OBSERVATIONS_IN_RANGE", request_id: requestId });
-      const jpRows = buildJpYieldRows(parsed.obs, jpSource.id, new Date().toISOString());
+      if (!historical.obs.length) return json(502, { ok: false, error: "MOF_JGB_NO_OBSERVATIONS_IN_RANGE", request_id: requestId });
+
+      // 2) Current-month file (optional but expected): daily values since the start of the current month.
+      const warnings: string[] = [];
+      let current: { obs: JgbObs[]; rejected: number } = { obs: [], rejected: 0 };
+      const currentInfo: Record<string, unknown> = { file: "jgbcme.csv", http_status: null, last_modified: null, observations: 0 };
+      try {
+        const r2 = await fetch(MOF_JGB_CURRENT_URL, { signal: AbortSignal.timeout(20000) });
+        currentInfo.http_status = r2.status;
+        currentInfo.last_modified = r2.headers.get("last-modified");
+        if (r2.ok) {
+          current = parseMofJgbCsv(new TextDecoder("utf-8", { fatal: false }).decode(await r2.arrayBuffer()), start, undefined, "jgbcme.csv");
+          currentInfo.observations = current.obs.length;
+        } else warnings.push(`CURRENT_MONTH_FILE_HTTP_${r2.status}`);
+      } catch (e) {
+        currentInfo.error = e instanceof Error ? e.message.slice(0, 120) : "FETCH_FAILED";
+        warnings.push("CURRENT_MONTH_FILE_UNAVAILABLE");
+      }
+
+      const merged = mergeJgbObs(historical.obs, current.obs);
+      // The files should touch or overlap. A larger gap means a month may be missing between them; the values that
+      // are present are still real, but the gap is reported instead of being filled.
+      if (merged.gap_days !== null && merged.gap_days > 5) warnings.push(`GAP_BETWEEN_FILES_${merged.gap_days}_DAYS`);
+      const allObs = merged.obs;
+      const jpRows = buildJpYieldRows(allObs, jpSource.id, new Date().toISOString());
       let jpUpserted = 0;
       if (!dryRun) {
         for (let i = 0; i < jpRows.length; i += 500) {
@@ -131,16 +156,23 @@ Deno.serve(async (req: Request) => {
       }
       const byTenor: Record<string, unknown> = {};
       for (const t of [2, 5, 10]) {
-        const rowsT = parsed.obs.filter((o) => o.tenor === t);
+        const rowsT = allObs.filter((o) => o.tenor === t);
         byTenor[`${t}Y`] = { observations: rowsT.length, first: rowsT[0]?.date ?? null, latest: rowsT.length ? rowsT[rowsT.length - 1] : null };
       }
-      const latestDate = parsed.obs[parsed.obs.length - 1].date;
+      const latestDate = allObs[allObs.length - 1].date;
+      const daysSinceLatest = Math.floor((Date.now() - Date.parse(latestDate + "T00:00:00Z")) / 86400000);
+      if (daysSinceLatest > 7) warnings.push(`LATEST_JAPAN_DATE_IS_${daysSinceLatest}_DAYS_OLD`);
       return json(200, {
         ok: true, status: "completed", market: "JP", request_id: requestId, dry_run: dryRun, start_date: start,
-        rows_built: jpRows.length, rows_upserted: jpUpserted, rejected_cells: parsed.rejected,
-        latest_date: latestDate, days_since_latest: Math.floor((Date.now() - Date.parse(latestDate + "T00:00:00Z")) / 86400000),
-        tenors: byTenor, availability_basis: AVAILABILITY_BASIS,
-        note: "Japan JGB benchmark yields (2Y, 5Y, 10Y) from the Ministry of Finance. Missing '-' cells are skipped, never stored as zero.",
+        rows_built: jpRows.length, rows_upserted: jpUpserted, rejected_cells: historical.rejected + current.rejected,
+        latest_date: latestDate, days_since_latest: daysSinceLatest,
+        files: {
+          historical: { file: "jgbcme_all.csv", observations: historical.obs.length },
+          current_month: currentInfo,
+          overlap_dates: merged.overlap_dates, gap_days: merged.gap_days,
+        },
+        tenors: byTenor, availability_basis: AVAILABILITY_BASIS, warnings,
+        note: "Japan JGB benchmark yields (2Y, 5Y, 10Y) from the Ministry of Finance: historical file plus the current-month file. Missing '-' cells and footnotes are skipped, never stored as zero.",
       });
     }
     if (!FRED_API_KEY) return json(503, { ok: false, error: "FRED_API_KEY_NOT_CONFIGURED", required_secret: "FRED_API_KEY", request_id: requestId });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseFredObservations, buildUsYieldRows, availableAt, probeLines, parseMofJgbCsv, buildJpYieldRows, extractCsvLinks, tailLines } from '../supabase/functions/yield-ingestion/yields.ts';
+import { parseFredObservations, buildUsYieldRows, availableAt, probeLines, parseMofJgbCsv, buildJpYieldRows, extractCsvLinks, tailLines, mergeJgbObs } from '../supabase/functions/yield-ingestion/yields.ts';
 
 test('FRED parsing drops missing markers and keeps real values, sorted', () => {
   const obs = parseFredObservations({ observations: [
@@ -54,7 +54,7 @@ const MOF = [
   '2021/1/4,-0.13,-0.12,-0.1,-0.09,-0.08,-0.05,-0.02,0.01,0.03,0.025,0.2,0.4,0.6,0.7,0.8',
   '2021/1/5,-0.13,-0.12,-0.1,-0.09,-0.08,-0.05,-0.02,0.01,0.03,-,0.2,0.4,0.6,0.7,0.8',
   '2021/1/6,-0.13,-0.12,-0.1',
-  'bad row,1,2,3',
+  '2021/13/45,1,2,3',
   '2021/1/7,-0.13,-0.12,-0.1,-0.09,-0.08,-0.05,-0.02,0.01,0.03,95,0.2,0.4,0.6,0.7,0.8',
 ].join('\r\n');
 
@@ -99,4 +99,42 @@ test('CSV links are extracted, resolved against the page, de-duplicated and limi
 test('tailLines returns the last non-empty lines, bounded in width', () => {
   assert.deepEqual(tailLines('a\nb\n\nc\r\nd\n\n', 2), ['c', 'd']);
   assert.equal(tailLines('x'.repeat(500), 1, 10)[0].length, 10);
+});
+
+test('footnotes and blank separator rows are skipped silently, not counted as rejected', () => {
+  const text = [
+    'Interest Rate (October 2026),,,,,,,,,,,,,,,(Unit : %)',
+    'Date,1Y,2Y,3Y,4Y,5Y,6Y,7Y,8Y,9Y,10Y,15Y,20Y,25Y,30Y,40Y',
+    '2026/10/1,1.668,1.939,2.077,2.274,2.407,2.534,2.657,2.82,2.952,3.092,3.62,3.91,4.154,4.122,4.125',
+    '2026/10/8,1.657,1.936,2.084,2.277,2.414,2.54,2.669,2.824,2.954,3.089,3.618,3.916,4.165,4.136,4.134',
+    ',,,,,,,,,,,,,,,',
+    '"  If you cannot download the latest csv data, please clear the browser cache.",,,,,,,,,,,,,,,',
+  ].join('\n');
+  const r = parseMofJgbCsv(text, '2026-10-01', undefined, 'jgbcme.csv');
+  assert.equal(r.rejected, 0);
+  assert.equal(r.obs.length, 6); // 2 dates x 3 tenors
+  assert.equal(r.obs.find((o) => o.date === '2026-10-08' && o.tenor === 10).value, 3.089);
+  assert.equal(r.obs[0].file, 'jgbcme.csv');
+  const rows = buildJpYieldRows(r.obs, 'src', '2026-10-11T00:00:00Z');
+  assert.match(rows[0].metadata.dataset, /jgbcme\.csv/);
+});
+
+test('merging keeps both files, prefers the current file on overlap and reports the gap', () => {
+  const hist = [{ date: '2026-09-29', tenor: 10, value: 3.082 }, { date: '2026-09-30', tenor: 10, value: 3.057 }];
+  const cur = [{ date: '2026-10-01', tenor: 10, value: 3.092 }, { date: '2026-09-30', tenor: 10, value: 3.058 }];
+  const m = mergeJgbObs(hist, cur);
+  assert.deepEqual(m.obs.map((o) => o.date), ['2026-09-29', '2026-09-30', '2026-10-01']);
+  assert.equal(m.obs.find((o) => o.date === '2026-09-30').value, 3.058); // current wins on the overlapping date
+  assert.equal(m.overlap_dates, 1);
+  assert.equal(m.gap_days, 0); // the current file starts on the last historical date: contiguous, no gap
+  assert.equal(mergeJgbObs(hist, [{ date: '2026-10-01', tenor: 10, value: 3.092 }]).gap_days, 1); // adjacent, no overlap
+  const far = mergeJgbObs(hist, [{ date: '2026-11-03', tenor: 10, value: 3.1 }]);
+  assert.equal(far.gap_days, 34);
+  assert.equal(mergeJgbObs(hist, []).gap_days, null);
+});
+
+test('an impossible calendar date is rejected', () => {
+  const r = parseMofJgbCsv('Date,2Y,5Y,10Y\n2026/2/30,1,2,3\n2026/2/27,1,2,3', '2026-01-01');
+  assert.equal(r.rejected, 1);
+  assert.equal(r.obs.length, 3);
 });
