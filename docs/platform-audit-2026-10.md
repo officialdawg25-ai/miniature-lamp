@@ -174,3 +174,17 @@ Programme total: 15 hypotheses in the ledger (14 rejected and retired; plain G8 
 
 ### Automatic risk engine (2026-10-13)
 Owner choice "option 2" on a 60 USD demo balance. Policy in percent of equity: 5% per trade, 10% daily, 20% weekly, 5% total open risk, kill switch at 30% drawdown from the equity peak, no new entry below a 300% margin level. `trading.refresh_risk_limits` recomputes the dollar limits (rounded down to the cent) on every broker snapshot, every paper ledger entry, every risk-gate evaluation and every 15 minutes (cron `risk-engine-refresh`), and audits every change. Equity comes from the MT5 host when its snapshot is under 15 minutes old (the first broker snapshot replaces the starting balance, audited) and otherwise from the paper ledger. Blocks: daily and weekly equity loss (including open losses), margin level, non-positive equity; the drawdown stop engages the kill switch, which only an owner can release. The host claim refuses an order when broker leverage is unknown or when its margin would take the margin level under the minimum. The host now reports leverage and the margin-call and stop-out levels from MT5 (`account_terms`, 14 host tests). Manual dollar edits are refused while the engine is on. Current limits: 3.00 / 6.00 / 12.00 / 3.00 USD from paper equity 60. Tests: `supabase/tests/auto_risk_engine.sql` 15 checks; all suites 91 of 91 pass (gate 31, bridge 22, controls 12, paper ticket 11, engine 15). Not covered: correlated exposure across instruments, Exness news-time and weekend margin increases (only visible through the margin MT5 reports), and gold margin rules beyond leverage.
+
+### Batch 4 and the gold forward test (2026-10-13)
+Rules, costs and criteria frozen in the ledger before each run (engine `event-study-v2`).
+
+| Hypothesis | Sample | Trades | Mean net | t | Checks |
+|---|---|---|---|---|---|
+| usdjpy-london-breakout-tokyo-range | 2020-10 to 2026-10 | 650 | +1.10 pips | 0.73 | 3 of 8 (PF 1.08, -5.19 pips without the best 5%) |
+| xauusd-asia-london-session-drift | 2020-01 to 2026-10 | 1,558 | +1.15 USD/oz | 1.66 | 5 of 9 (p 0.049 vs 0.025; first half -0.37, holdout +3.74; double costs +0.75; -2.42 without the best 5%; PF 1.16; Asia+London +1.55 vs US -0.68 gross, Welch p 0.009) |
+
+Both retired. Gold session drift is the strongest result in the programme, but it fails significance, the first half and the trimmed mean. An exact replication on 2016-2020 (`xauusd-asia-london-session-drift-replication`) was retired as unrunnable: Twelve Data's 15-minute gold history starts 2020-01-24, leaving 162 unseen days against the registered minimum of 500. Those days were not examined.
+
+Forward test `xauusd-asia-london-session-drift-forward`: the unchanged rule (0.40 USD/oz cost) on trading days from 2026-10-14. `intraday-twelvedata` has a forward mode (from the newest stored bar, closed bars only), run hourly on weekdays for XAUUSD and USDJPY (crons `intraday-forward-xauusd`, `intraday-forward-usdjpy`); first call stored 34 closed bars each. `intelligence.run_gold_session_forward` stores a monthly interim run (cron `gold-session-forward-monthly`, monitoring only) and the decision is taken once at 250 days with the same checks plus the Welch session benchmark. The rule has no stop; a tradable version would need its own registered risk design under the account policy.
+
+Programme total: 19 hypotheses (18 retired, plain G8 carry at "tested", the forward test collecting data). None research-validated.
