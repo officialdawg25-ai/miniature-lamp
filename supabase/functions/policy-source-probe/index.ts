@@ -36,7 +36,7 @@ Deno.serve(async (req: Request) => {
   const body = await req.json().catch(() => ({}));
   if (Array.isArray(body.urls)) {
     // Fetches a few allow-listed public statistics URLs and reports status, type and the first lines. Nothing is stored.
-    const allowed = new Set(["stats.bis.org", "data.snb.ch", "www.bankofengland.co.uk", "publicreporting.cftc.gov"]);
+    const allowed = new Set(["stats.bis.org", "data.snb.ch", "www.bankofengland.co.uk", "publicreporting.cftc.gov", "datafeed.dukascopy.com"]);
     const out = await Promise.all(body.urls.slice(0, 8).map(async (u: unknown) => {
       try {
         const url = new URL(String(u));
