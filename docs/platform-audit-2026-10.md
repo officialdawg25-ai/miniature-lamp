@@ -133,3 +133,11 @@ Not yet built: drawdown stop, correlated-exposure limit, economic calendar with 
 
 ### Economic calendar source (2026-10-13)
 Financial Modeling Prep's economic-calendar endpoint is refused on the free key (HTTP 402), so it is registered but inactive. The calendar now loads from the free Forex Factory weekly feed (unofficial; forecast, previous and impact only, no actuals) through `calendar-ingestion`, hourly on weekdays (cron `hourly-calendar-refresh`). 109 events stored, 52 with forecasts. Each value carries first-seen timestamps. No surprise is computed from this source. `macro_upsert_calendar_events(jsonb)` (first version) remains unused in the database; dropping it is an owner task.
+
+### Regime, paper ticket and lifecycle (2026-10-13)
+- `intelligence.compute_macro_regime()` (rules_v1, daily 07:40 UTC) classifies US growth and inflation from stored values, with the Fed phase as context. No probability or confidence is stored. Rows are flagged not point-in-time safe and must not feed backtests. First row: growth_disinflation (CPI y/y 3.40% vs 4.25% three months earlier, real GDP 2.2%, unemployment flat).
+- `submit_paper_idea`, `approve_and_fill_paper`, `close_paper_position`, `mark_paper_position_price` and `get_lifecycle` give the operator a paper path through the existing gate and paper accounting: sized from the risk policy (rejected, never rounded up, when 0.01 lot exceeds the budget), approval by an owner, instant paper fill at the entered price, USD profit and R computed from contract-scaled units. Contract specs for 8 instruments are standard assumptions and are flagged as assumed on every setup. Paper mode only; the demo host path is untouched.
+- Trade lifecycle page shows each idea as thesis, risk gate, request, order and outcome. The Live chart can prefill a ticket from the SMC and Fibonacci levels.
+- `supabase/tests/paper_ticket.sql`: 11 checks. In the run, 10 passed; the eleventh (P7) failed only because the expected value in the test was wrong (0.316 instead of 0.633); the function returned the correct 0.6329 and the test was corrected.
+
+Not built: news feed, market sentiment beyond positioning, drawdown stop and correlated-exposure limits, order management after fill (trailing and partial exits), volatility-adjusted stops, ML models (no validated baseline exists to compare against), BLS-actual surprises.
