@@ -334,3 +334,6 @@ main > .content > footer > span { display: inline-flex; align-items: center; gap
 .ctlrow { align-items: flex-end; }
 
 .spark { display: block; max-width: 100%; }
+
+.impact { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); }
+.impact.hi { color: var(--red); }

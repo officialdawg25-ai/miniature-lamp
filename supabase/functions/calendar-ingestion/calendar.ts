@@ -44,3 +44,31 @@ export function parseCalendar(payload: unknown): { rows: CalendarRow[]; rejected
 export function surprise(row: Pick<CalendarRow, "actual" | "estimate">): number | null {
   return row.actual !== null && row.estimate !== null ? Math.round((row.actual - row.estimate) * 1e6) / 1e6 : null;
 }
+
+// Forex Factory weekly JSON feed (nfs.faireconomy.media). Rows look like
+// { title, country: "USD", date: "2026-10-14T08:30:00-04:00", impact: "High", forecast: "0.3%", previous: "0.2%" }.
+// It carries no actual values, so actual stays null and no surprise is ever derived from it.
+const SUFFIX: Record<string, number> = { K: 1e3, M: 1e6, B: 1e9, T: 1e12 };
+export function parseFeedNumber(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const m = /^\s*(-?\d+(?:\.\d+)?)\s*([KMBT%]?)\s*$/i.exec(String(v));
+  if (!m) return null;
+  const mult = m[2] && m[2] !== "%" ? SUFFIX[m[2].toUpperCase()] : 1;
+  const n = Number(m[1]) * mult;
+  return Number.isFinite(n) ? Math.round(n * 1e9) / 1e9 : null;
+}
+
+export function parseFaireconomy(payload: unknown): { rows: CalendarRow[]; rejected: number } {
+  if (!Array.isArray(payload)) throw new CalendarError("feed is not a list");
+  const byKey = new Map<string, CalendarRow>();
+  let rejected = 0;
+  for (const r of payload as Record<string, unknown>[]) {
+    const t = Date.parse(String(r?.date ?? ""));
+    const event = String(r?.title ?? "").trim(), country = String(r?.country ?? "").trim().toUpperCase();
+    if (!Number.isFinite(t) || !event || !country) { rejected++; continue; }
+    const scheduled_at = new Date(t).toISOString();
+    const event_key = `${scheduled_at}|${country}|${event}`;
+    byKey.set(event_key, { event_key, scheduled_at, country, currency: country.length === 3 ? country : null, event, impact: impactOf(r?.impact), previous: parseFeedNumber(r?.previous), estimate: parseFeedNumber(r?.forecast), actual: null });
+  }
+  return { rows: [...byKey.values()].sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at) || a.event.localeCompare(b.event)), rejected };
+}

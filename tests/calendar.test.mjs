@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCalendar, surprise, CalendarError } from '../supabase/functions/calendar-ingestion/calendar.ts';
+import { parseCalendar, parseFaireconomy, parseFeedNumber, surprise, CalendarError } from '../supabase/functions/calendar-ingestion/calendar.ts';
 
 const row = (o = {}) => ({ date: '2026-10-14 12:30:00', country: 'us', event: 'CPI (MoM) (Sep)', currency: 'usd', previous: 0.3, estimate: 0.3, actual: null, impact: 'High', ...o });
 
@@ -43,4 +43,29 @@ test('surprise needs both actual and estimate', () => {
   assert.equal(surprise({ actual: 0.4, estimate: 0.3 }), 0.1);
   assert.equal(surprise({ actual: null, estimate: 0.3 }), null);
   assert.equal(surprise({ actual: 0.4, estimate: null }), null);
+});
+
+test('feed numbers: percent, suffixes and blanks', () => {
+  assert.equal(parseFeedNumber('0.3%'), 0.3);
+  assert.equal(parseFeedNumber('-0.1%'), -0.1);
+  assert.equal(parseFeedNumber('215K'), 215000);
+  assert.equal(parseFeedNumber('1.2M'), 1200000);
+  assert.equal(parseFeedNumber(''), null);
+  assert.equal(parseFeedNumber('abc'), null);
+  assert.equal(parseFeedNumber(undefined), null);
+});
+
+test('feed rows convert the offset to UTC and never invent an actual', () => {
+  const { rows, rejected } = parseFaireconomy([
+    { title: 'CPI m/m', country: 'USD', date: '2026-10-14T08:30:00-04:00', impact: 'High', forecast: '0.3%', previous: '0.2%' },
+    { title: '', country: 'USD', date: '2026-10-14T08:30:00-04:00' },
+    { title: 'Bad', country: 'EUR', date: 'nope' },
+  ]);
+  assert.equal(rejected, 2);
+  assert.equal(rows[0].scheduled_at, '2026-10-14T12:30:00.000Z');
+  assert.equal(rows[0].estimate, 0.3);
+  assert.equal(rows[0].previous, 0.2);
+  assert.equal(rows[0].actual, null);
+  assert.equal(rows[0].impact, 'high');
+  assert.equal(rows[0].currency, 'USD');
 });
