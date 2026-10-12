@@ -157,3 +157,17 @@ Engine: `fx-research` Edge Function (`fx.ts`, 7 unit tests) on `public.research_
 All three retired; runs stored in `intelligence.backtest_runs`. Reference run (not a new trial): plain carry on the same engine gives net Sharpe 0.19 with the financing haircut and 0.29 without; the earlier ad hoc test reported 0.42 (p 0.038) and could not be reproduced exactly, so that earlier figure should be treated as an upper bound. Known limitation of the registered permutation test for carry-like strategies: shifting weights in time keeps most carry income (rate ranks are persistent), so its p-value is conservative for them. It was kept as registered; changing an acceptance rule after seeing results is not allowed, a new rule needs a new pre-registration.
 
 Even a validated portfolio of this kind could not be traded on a 15 USD account under stop-based per-trade risk limits: six simultaneous legs at the 0.01 lot minimum exceed the 0.75 USD per-trade budget.
+
+### Intraday event studies, batch 3 (2026-10-13)
+Engine `event-study-v1` (SQL: `trades_usdjpy_tokyo_window`, `trades_release_continuation`, `trade_stats`, `run_event_study`, `run_release_fade_oos`). Statistics were checked against hand-computed values before any real trade was produced; that check found and fixed a precedence bug in `norm_cdf` (unary minus binds tighter than `^` in Postgres). Data checks: 15-minute USDJPY and XAUUSD bars have no duplicates, off-grid times or invalid OHLC; the bar timestamp is the bar open (the release spike sits in the bar stamped with the release time). All rules, costs and criteria were frozen in the ledger before each run.
+
+| Hypothesis | Sample | Trades | Mean net | t | Checks |
+|---|---|---|---|---|---|
+| usdjpy-gotobi-tokyo-fix-drift | 2023-08 to 2026-10 | 223 | -2.52 pips | -3.18 | 1 of 9 (gotobi -0.72 pips gross vs -0.66 on other days, Welch p 0.53) |
+| us-release-continuation-usdjpy | 2023-09 to 2026-10 | 73 | -13.14 pips | -2.57 | 1 of 8 |
+| us-release-continuation-xauusd | 2023-09 to 2026-10 | 71 | -0.97 USD/oz | -0.43 | 3 of 8 |
+| us-release-fade-usdjpy-oos | 2021-01 to 2023-08 (independent) | 61 | -6.98 pips | -1.09 | 1 of 7 |
+
+The fade hypothesis was suggested by the continuation result, so it was registered with its origin disclosed and judged only on releases before 2023-08-22, data the platform loaded after freezing the rule (USDJPY 15m backfilled to 2020-10-29: 70,000 bars, clean, continuous join). It failed: the 2023-2026 reversal was sample-specific. All four retired.
+
+Programme total: 18 recorded strategy tests, none research-validated. Untestable with current data: signed macro-surprise strategies (no historical consensus), intervention-risk models (no timestamped official intervention record), gold financing-specific tests (no historical swap data).
