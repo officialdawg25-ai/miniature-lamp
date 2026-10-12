@@ -127,3 +127,9 @@ Added in this step:
 - Edge function `live-candles` (read only, vendor key server side, 10 s cache) and a Live chart page drawing candles with the owner's SMC and Fibonacci levels (`src/smc.js`, 6 tests). The overlay is an annotation, not an approved signal. Candles are vendor mid quotes polled every 20 s; this is near-real-time, not tick streaming.
 
 Not yet built: drawdown stop, correlated-exposure limit, economic calendar with consensus, news, sentiment page, regime detection, lifecycle timeline per decision, paper-trading engine, ML layer.
+
+### Macro pages (2026-10-13)
+`public.get_macro_intelligence()` returns one read-only snapshot (policy rates for 8 banks, US and Japan yields and the 10Y spread, CFTC leveraged-fund positioning with a 5-year percentile using only reports already available, the release calendar and the latest US indicator prints). Five pages now read it: Central bank policy, Yield differentials, COT positioning, Inflation & growth and a new Economic calendar. Verified against production data (8 banks, 5 yield series, 7 currencies, 13 upcoming releases, 11 indicators). Still missing and stated on the pages: consensus and forecasts, non-US data, meeting dates and statements, market-implied rate paths, year-over-year transforms, news and sentiment beyond positioning.
+
+### Economic calendar source (2026-10-13)
+Financial Modeling Prep's economic-calendar endpoint is refused on the free key (HTTP 402), so it is registered but inactive. The calendar now loads from the free Forex Factory weekly feed (unofficial; forecast, previous and impact only, no actuals) through `calendar-ingestion`, hourly on weekdays (cron `hourly-calendar-refresh`). 109 events stored, 52 with forecasts. Each value carries first-seen timestamps. No surprise is computed from this source. `macro_upsert_calendar_events(jsonb)` (first version) remains unused in the database; dropping it is an owner task.
