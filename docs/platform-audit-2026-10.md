@@ -144,3 +144,16 @@ Not built: news feed, market sentiment beyond positioning, drawdown stop and cor
 
 ### News (2026-10-13)
 Alpha Vantage's NEWS_SENTIMENT endpoint is refused as premium on the saved key, and GDELT answers HTTP 429 from the shared Edge Function address. News therefore comes from the eight central banks' official RSS and Atom feeds (all eight verified, 74 articles in two weeks), refreshed every two hours (cron `news-central-banks-refresh`). No sentiment is stored because no validated scoring exists. Defect found and handled: the Bank of Canada feed lists scheduled events (holidays, conferences) with future dates; the database function now rejects anything dated more than an hour ahead, and reads exclude the rows stored before the guard. `news_upsert_articles` (first version) remains unused in the database.
+
+### G8 FX portfolio research, batch 2 (2026-10-13)
+Engine: `fx-research` Edge Function (`fx.ts`, 7 unit tests) on `public.research_fx_panel()` (4,997 aligned daily bars from 2007-08-09; Fed rate from 2008-12-16). Rules, costs (2 bp per unit traded, 0.5% a year financing haircut on gross exposure) and the acceptance thresholds were registered in the ledger before the first run: net Sharpe >= 0.50, timing-permutation p <= 0.05/6, both halves positive, Sharpe >= 0.30 at double costs, deflated Sharpe >= 0.95, max drawdown no worse than -30%. Multiplicity family size 6.
+
+| Hypothesis | Net Sharpe | Perm. p | Halves | Deflated Sharpe | Checks passed |
+|---|---|---|---|---|---|
+| fx-g8-time-series-trend-volscaled | -0.04 | 0.375 | -0.10 / +0.02 | 0.07 | 2 of 7 |
+| fx-g8-carry-trend-filter | 0.01 | 0.673 | +0.10 / -0.11 | 0.11 | 1 of 7 |
+| fx-g8-carry-vol-managed | 0.08 | 0.906 | -0.07 / +0.24 | 0.17 | 2 of 7 |
+
+All three retired; runs stored in `intelligence.backtest_runs`. Reference run (not a new trial): plain carry on the same engine gives net Sharpe 0.19 with the financing haircut and 0.29 without; the earlier ad hoc test reported 0.42 (p 0.038) and could not be reproduced exactly, so that earlier figure should be treated as an upper bound. Known limitation of the registered permutation test for carry-like strategies: shifting weights in time keeps most carry income (rate ranks are persistent), so its p-value is conservative for them. It was kept as registered; changing an acceptance rule after seeing results is not allowed, a new rule needs a new pre-registration.
+
+Even a validated portfolio of this kind could not be traded on a 15 USD account under stop-based per-trade risk limits: six simultaneous legs at the 0.01 lot minimum exceed the 0.75 USD per-trade budget.
