@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.0";
 import { alignAsOf, alignAsOfMaxAge, runBacktest, subtractSeries, type Num } from "./backtest.ts";
 
-const CODE_VERSION = "backtest-v3";
+const CODE_VERSION = "backtest-v4";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -147,12 +147,19 @@ Deno.serve(async (req: Request) => {
       days_with_signal: diff10.filter((v) => v !== null).length,
       close_checksum: Math.round(close.reduce((a, b) => a + b, 0) * 1000),
     };
+    const years = close.length / 252;
+    const longWindow = years >= 8;
     const common = [
-      "About 5 years of daily data gives low statistical power: only a strong edge can be confirmed. 'No evidence' is not proof that no edge exists.",
+      longWindow
+        ? `About ${years.toFixed(1)} years of daily data. That is more than a five-year window, but only a strong, stable edge can still be confirmed, and 'no evidence' is not proof that no edge exists.`
+        : `About ${years.toFixed(1)} years of daily data gives low statistical power: only a strong edge can be confirmed. 'No evidence' is not proof that no edge exists.`,
       "This is research output, not a trading signal or a forecast.",
     ];
+    const regime = (asset: string) => longWindow
+      ? `The sample spans several market regimes, so one walk-forward summary averages over very different conditions. Check whether any result comes from a single period. ${asset} also trended in places, so compare with buy-and-hold, not with zero.`
+      : `The sample is one market regime: ${asset} trended strongly, so any long-biased rule benefits. Compare with buy-and-hold, not with zero.`;
     const caveats = isGold ? [
-      "The sample is one market regime: gold rose strongly, so any long-biased rule benefits. Compare with buy-and-hold, not with zero.",
+      regime("Gold"),
       "The rate rules use a fixed prior set in advance: a rising real yield favours a short gold position and a falling one a long. The direction is not fitted.",
       "Gold has no carry term here, so only the price move is earned. Spot gold carries financing and storage-type costs that are not modelled.",
       "The stored gold series has weekend rows, which spot gold does not trade on; they are excluded, and the closes are daily values from a single provider, not exchange settlement prices.",
@@ -161,12 +168,12 @@ Deno.serve(async (req: Request) => {
     ] : isPolicy ? [
       "The signal is the Fed target (upper bound) minus the Bank of Japan overnight call rate. The BoJ figure is a market rate that tracks the policy rate, not the policy target itself.",
       "Policy rates move in a handful of steps, so the number of independent changes behind this signal is small even though there are many daily observations. That limits what any test can conclude.",
-      "The sample is one market regime: USDJPY trended strongly higher, so any long-biased rule benefits. Compare with buy-and-hold, not with zero.",
+      regime("USDJPY"),
       "Carry is the same proxy as the yield-differential run (US 2Y minus Japan 2Y yields), so the two runs are comparable.",
       "This is another hypothesis tested on the same price history. Every run, stored or not, adds to the multiple-testing problem; the correction here counts only the nine rules inside this run.",
       ...common,
     ] : [
-      "The sample is one market regime: USDJPY trended strongly higher, so any long-biased rule benefits. Compare with buy-and-hold, not with zero.",
+      regime("USDJPY"),
       "Carry is a proxy from US 2Y minus Japan 2Y yields; real swap rates differ and include broker markup.",
       "Yield availability times are conservative (two days after each date); real publication is faster, so results are if anything understated on timing.",
       ...common,
