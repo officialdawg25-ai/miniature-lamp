@@ -348,3 +348,16 @@ main > .content > footer > span { display: inline-flex; align-items: center; gap
 .chainhead .neg { color: var(--red); }
 .inl { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .pxin { width: 110px; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; }
+
+/* Research ledger */
+.ledger { border-top: 1px solid var(--line); padding: 14px 0; }
+.ledger summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; list-style: none; }
+.ledger summary::-webkit-details-marker { display: none; }
+.ledger summary b { font-size: 15px; }
+.ledger summary em { font-style: normal; color: var(--muted); font-size: 13px; }
+.lstat { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; background: var(--line); color: var(--ink-2); }
+.lstat.rej { background: var(--red-soft); color: var(--red); }
+.lstat.ok { background: var(--green-soft); color: var(--green); }
+.chk { font-size: 12px; letter-spacing: 0.04em; }
+.chk.ok { color: var(--green); }
+.chk.no { color: var(--red); }

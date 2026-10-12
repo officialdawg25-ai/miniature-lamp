@@ -141,3 +141,50 @@ Financial Modeling Prep's economic-calendar endpoint is refused on the free key 
 - `supabase/tests/paper_ticket.sql`: 11 checks. In the run, 10 passed; the eleventh (P7) failed only because the expected value in the test was wrong (0.316 instead of 0.633); the function returned the correct 0.6329 and the test was corrected.
 
 Not built: news feed, market sentiment beyond positioning, drawdown stop and correlated-exposure limits, order management after fill (trailing and partial exits), volatility-adjusted stops, ML models (no validated baseline exists to compare against), BLS-actual surprises.
+
+### News (2026-10-13)
+Alpha Vantage's NEWS_SENTIMENT endpoint is refused as premium on the saved key, and GDELT answers HTTP 429 from the shared Edge Function address. News therefore comes from the eight central banks' official RSS and Atom feeds (all eight verified, 74 articles in two weeks), refreshed every two hours (cron `news-central-banks-refresh`). No sentiment is stored because no validated scoring exists. Defect found and handled: the Bank of Canada feed lists scheduled events (holidays, conferences) with future dates; the database function now rejects anything dated more than an hour ahead, and reads exclude the rows stored before the guard. `news_upsert_articles` (first version) remains unused in the database.
+
+### G8 FX portfolio research, batch 2 (2026-10-13)
+Engine: `fx-research` Edge Function (`fx.ts`, 7 unit tests) on `public.research_fx_panel()` (4,997 aligned daily bars from 2007-08-09; Fed rate from 2008-12-16). Rules, costs (2 bp per unit traded, 0.5% a year financing haircut on gross exposure) and the acceptance thresholds were registered in the ledger before the first run: net Sharpe >= 0.50, timing-permutation p <= 0.05/6, both halves positive, Sharpe >= 0.30 at double costs, deflated Sharpe >= 0.95, max drawdown no worse than -30%. Multiplicity family size 6.
+
+| Hypothesis | Net Sharpe | Perm. p | Halves | Deflated Sharpe | Checks passed |
+|---|---|---|---|---|---|
+| fx-g8-time-series-trend-volscaled | -0.04 | 0.375 | -0.10 / +0.02 | 0.07 | 2 of 7 |
+| fx-g8-carry-trend-filter | 0.01 | 0.673 | +0.10 / -0.11 | 0.11 | 1 of 7 |
+| fx-g8-carry-vol-managed | 0.08 | 0.906 | -0.07 / +0.24 | 0.17 | 2 of 7 |
+
+All three retired; runs stored in `intelligence.backtest_runs`. Reference run (not a new trial): plain carry on the same engine gives net Sharpe 0.19 with the financing haircut and 0.29 without; the earlier ad hoc test reported 0.42 (p 0.038) and could not be reproduced exactly, so that earlier figure should be treated as an upper bound. Known limitation of the registered permutation test for carry-like strategies: shifting weights in time keeps most carry income (rate ranks are persistent), so its p-value is conservative for them. It was kept as registered; changing an acceptance rule after seeing results is not allowed, a new rule needs a new pre-registration.
+
+Even a validated portfolio of this kind could not be traded on a 15 USD account under stop-based per-trade risk limits: six simultaneous legs at the 0.01 lot minimum exceed the 0.75 USD per-trade budget.
+
+### Intraday event studies, batch 3 (2026-10-13)
+Engine `event-study-v1` (SQL: `trades_usdjpy_tokyo_window`, `trades_release_continuation`, `trade_stats`, `run_event_study`, `run_release_fade_oos`). Statistics were checked against hand-computed values before any real trade was produced; that check found and fixed a precedence bug in `norm_cdf` (unary minus binds tighter than `^` in Postgres). Data checks: 15-minute USDJPY and XAUUSD bars have no duplicates, off-grid times or invalid OHLC; the bar timestamp is the bar open (the release spike sits in the bar stamped with the release time). All rules, costs and criteria were frozen in the ledger before each run.
+
+| Hypothesis | Sample | Trades | Mean net | t | Checks |
+|---|---|---|---|---|---|
+| usdjpy-gotobi-tokyo-fix-drift | 2023-08 to 2026-10 | 223 | -2.52 pips | -3.18 | 1 of 9 (gotobi -0.72 pips gross vs -0.66 on other days, Welch p 0.53) |
+| us-release-continuation-usdjpy | 2023-09 to 2026-10 | 73 | -13.14 pips | -2.57 | 1 of 8 |
+| us-release-continuation-xauusd | 2023-09 to 2026-10 | 71 | -0.97 USD/oz | -0.43 | 3 of 8 |
+| us-release-fade-usdjpy-oos | 2021-01 to 2023-08 (independent) | 61 | -6.98 pips | -1.09 | 1 of 7 |
+
+The fade hypothesis was suggested by the continuation result, so it was registered with its origin disclosed and judged only on releases before 2023-08-22, data the platform loaded after freezing the rule (USDJPY 15m backfilled to 2020-10-29: 70,000 bars, clean, continuous join). It failed: the 2023-2026 reversal was sample-specific. All four retired.
+
+Programme total: 15 hypotheses in the ledger (14 rejected and retired; plain G8 carry left at "tested" with a weak, non-reproduced result), none research-validated. Seven have stored runs with every check; the earliest eight were run before runs were stored. Untestable with current data: signed macro-surprise strategies (no historical consensus), intervention-risk models (no timestamped official intervention record), gold financing-specific tests (no historical swap data).
+
+### Automatic risk engine (2026-10-13)
+Owner choice "option 2" on a 60 USD demo balance. Policy in percent of equity: 5% per trade, 10% daily, 20% weekly, 5% total open risk, kill switch at 30% drawdown from the equity peak, no new entry below a 300% margin level. `trading.refresh_risk_limits` recomputes the dollar limits (rounded down to the cent) on every broker snapshot, every paper ledger entry, every risk-gate evaluation and every 15 minutes (cron `risk-engine-refresh`), and audits every change. Equity comes from the MT5 host when its snapshot is under 15 minutes old (the first broker snapshot replaces the starting balance, audited) and otherwise from the paper ledger. Blocks: daily and weekly equity loss (including open losses), margin level, non-positive equity; the drawdown stop engages the kill switch, which only an owner can release. The host claim refuses an order when broker leverage is unknown or when its margin would take the margin level under the minimum. The host now reports leverage and the margin-call and stop-out levels from MT5 (`account_terms`, 14 host tests). Manual dollar edits are refused while the engine is on. Current limits: 3.00 / 6.00 / 12.00 / 3.00 USD from paper equity 60. Tests: `supabase/tests/auto_risk_engine.sql` 15 checks; all suites 91 of 91 pass (gate 31, bridge 22, controls 12, paper ticket 11, engine 15). Not covered: correlated exposure across instruments, Exness news-time and weekend margin increases (only visible through the margin MT5 reports), and gold margin rules beyond leverage.
+
+### Batch 4 and the gold forward test (2026-10-13)
+Rules, costs and criteria frozen in the ledger before each run (engine `event-study-v2`).
+
+| Hypothesis | Sample | Trades | Mean net | t | Checks |
+|---|---|---|---|---|---|
+| usdjpy-london-breakout-tokyo-range | 2020-10 to 2026-10 | 650 | +1.10 pips | 0.73 | 3 of 8 (PF 1.08, -5.19 pips without the best 5%) |
+| xauusd-asia-london-session-drift | 2020-01 to 2026-10 | 1,558 | +1.15 USD/oz | 1.66 | 5 of 9 (p 0.049 vs 0.025; first half -0.37, holdout +3.74; double costs +0.75; -2.42 without the best 5%; PF 1.16; Asia+London +1.55 vs US -0.68 gross, Welch p 0.009) |
+
+Both retired. Gold session drift is the strongest result in the programme, but it fails significance, the first half and the trimmed mean. An exact replication on 2016-2020 (`xauusd-asia-london-session-drift-replication`) was retired as unrunnable: Twelve Data's 15-minute gold history starts 2020-01-24, leaving 162 unseen days against the registered minimum of 500. Those days were not examined.
+
+Forward test `xauusd-asia-london-session-drift-forward`: the unchanged rule (0.40 USD/oz cost) on trading days from 2026-10-14. `intraday-twelvedata` has a forward mode (from the newest stored bar, closed bars only), run hourly on weekdays for XAUUSD and USDJPY (crons `intraday-forward-xauusd`, `intraday-forward-usdjpy`); first call stored 34 closed bars each. `intelligence.run_gold_session_forward` stores a monthly interim run (cron `gold-session-forward-monthly`, monitoring only) and the decision is taken once at 250 days with the same checks plus the Welch session benchmark. The rule has no stop; a tradable version would need its own registered risk design under the account policy.
+
+Programme total: 19 hypotheses (18 retired, plain G8 carry at "tested", the forward test collecting data). None research-validated.

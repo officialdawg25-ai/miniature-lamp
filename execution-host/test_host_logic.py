@@ -73,6 +73,13 @@ class Snapshot(unittest.TestCase):
         self.assertEqual(s["orders"][0]["symbol"], "XAUUSD")
         self.assertEqual(s["equity"], 14.8)
 
+    def test_account_terms_are_reported_and_missing_ones_stay_none(self):
+        info = NS(balance=60, equity=60, margin=0, margin_free=60, currency="USD", leverage=2000, margin_level=0.0, margin_so_call=60.0, margin_so_so=0.0, margin_so_mode=0)
+        s = h.build_snapshot(info, [], [], "m")
+        self.assertEqual(s["terms"], {"leverage": 2000, "margin_level": 0.0, "margin_call_level": 60.0, "stop_out_level": 0.0, "margin_so_mode": 0})
+        bare = h.build_snapshot(NS(balance=1, equity=1, margin=0, margin_free=1, currency="USD"), [], [], "")
+        self.assertEqual(bare["terms"], {"leverage": None, "margin_level": None, "margin_call_level": None, "stop_out_level": None, "margin_so_mode": None})
+
     def test_missing_stop_is_reported_as_zero(self):
         info = NS(balance=1, equity=1, margin=0, margin_free=1, currency="USD")
         pos = [NS(ticket=1, symbol="X", type=1, volume=0.01, price_open=1.0, sl=None, tp=None, profit=0, comment=None)]

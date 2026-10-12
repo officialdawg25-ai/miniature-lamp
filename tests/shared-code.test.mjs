@@ -17,3 +17,7 @@ test('scheduled-refresh policy.ts is identical to policy-rate-ingestion policy.t
 test('live-candles twelve.ts is identical to intraday-twelvedata twelve.ts', () => {
   same('supabase/functions/live-candles/twelve.ts', 'supabase/functions/intraday-twelvedata/twelve.ts');
 });
+
+test('fx-research backtest.ts is identical to backtest-runner backtest.ts', () => {
+  same('supabase/functions/fx-research/backtest.ts', 'supabase/functions/backtest-runner/backtest.ts');
+});

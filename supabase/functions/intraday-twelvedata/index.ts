@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.0";
 import { SYMBOLS, VendorError, formatEndDate, parseTimeSeries } from "./twelve.ts";
 
-// Backfills 15-minute bars backwards in time from Twelve Data, one request per call, so it never bursts against the free-plan limit and
+// Backfills 15-minute bars backwards in time from Twelve Data (or, with direction "forward", fetches the newest closed bars), one request per call, so it never bursts against the free-plan limit and
 // adds negligible load. Authenticated with the shared cron secret. Dry run by default. Idempotent upserts.
 // The API key is an Edge Function secret (TWELVE_DATA_API_KEY) and never appears in logs or responses.
 const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -23,6 +23,7 @@ Deno.serve(async (req: Request) => {
   const symbol = String(body.symbol ?? "").toUpperCase();
   const dryRun = body.dry_run !== false;
   const targetStart = String(body.target_start ?? "2023-10-01");
+  const forward = body.direction === "forward";
   if (!(symbol in SYMBOLS)) return json(400, { ok: false, error: "UNSUPPORTED_SYMBOL", supported: Object.keys(SYMBOLS) });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(targetStart)) return json(400, { ok: false, error: "INVALID_TARGET_START" });
 
@@ -31,11 +32,19 @@ Deno.serve(async (req: Request) => {
     const { data: src } = await sb.schema("core").from("data_sources").select("id").eq("name", "Twelve Data").eq("active", true).maybeSingle();
     if (!inst || !src) return json(500, { ok: false, error: "INSTRUMENT_OR_SOURCE_NOT_REGISTERED" });
 
-    const { data: oldest } = await sb.schema("market").from("price_bars").select("ts").eq("instrument_id", inst.id).eq("timeframe", "15m").eq("source_id", src.id).order("ts", { ascending: true }).limit(1).maybeSingle();
-    const end = oldest ? new Date(Date.parse(oldest.ts) - 60000).toISOString() : new Date().toISOString();
-    if (end.slice(0, 10) <= targetStart) return json(200, { ok: true, done: true, reason: "target_start_reached", symbol, oldest_stored: oldest?.ts ?? null });
-
-    const params = new URLSearchParams({ symbol: SYMBOLS[symbol], interval: "15min", outputsize: "5000", end_date: formatEndDate(end), timezone: "UTC", order: "DESC", apikey: API_KEY });
+    let params: URLSearchParams;
+    if (forward) {
+      // Forward mode: fetch bars after the newest stored one, up to now. A bar whose 15 minutes have not ended yet is still forming and is never stored.
+      const { data: newest } = await sb.schema("market").from("price_bars").select("ts").eq("instrument_id", inst.id).eq("timeframe", "15m").eq("source_id", src.id).order("ts", { ascending: false }).limit(1).maybeSingle();
+      if (!newest) return json(400, { ok: false, error: "NO_HISTORY_FOR_FORWARD_MODE" });
+      const start = new Date(Date.parse(newest.ts) + 60000).toISOString();
+      params = new URLSearchParams({ symbol: SYMBOLS[symbol], interval: "15min", outputsize: "5000", start_date: formatEndDate(start), timezone: "UTC", order: "ASC", apikey: API_KEY });
+    } else {
+      const { data: oldest } = await sb.schema("market").from("price_bars").select("ts").eq("instrument_id", inst.id).eq("timeframe", "15m").eq("source_id", src.id).order("ts", { ascending: true }).limit(1).maybeSingle();
+      const end = oldest ? new Date(Date.parse(oldest.ts) - 60000).toISOString() : new Date().toISOString();
+      if (end.slice(0, 10) <= targetStart) return json(200, { ok: true, done: true, reason: "target_start_reached", symbol, oldest_stored: oldest?.ts ?? null });
+      params = new URLSearchParams({ symbol: SYMBOLS[symbol], interval: "15min", outputsize: "5000", end_date: formatEndDate(end), timezone: "UTC", order: "DESC", apikey: API_KEY });
+    }
     const r = await fetch(`https://api.twelvedata.com/time_series?${params}`, { signal: AbortSignal.timeout(30000) });
     const payload = await r.json().catch(() => null);
     if (!payload) return json(502, { ok: false, error: "VENDOR_NOT_JSON", http_status: r.status });
@@ -45,8 +54,9 @@ Deno.serve(async (req: Request) => {
       if (e instanceof VendorError) return json(e.code === 429 ? 429 : 502, { ok: false, error: "VENDOR_ERROR", vendor_code: e.code, message: e.message, retry_later: e.code === 429 });
       throw e;
     }
-    const { bars, rejected } = parsed;
-    if (!bars.length) return json(200, { ok: true, done: true, reason: "no_more_data", symbol, rejected });
+    const { rejected } = parsed;
+    const bars = forward ? parsed.bars.filter((b) => Date.parse(b.ts) + 15 * 60000 <= Date.now()) : parsed.bars;
+    if (!bars.length) return json(200, { ok: true, done: true, reason: forward ? "no_new_closed_bars" : "no_more_data", symbol, rejected });
 
     let upserted = 0;
     if (!dryRun) {
