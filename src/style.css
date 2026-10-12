@@ -337,3 +337,14 @@ main > .content > footer > span { display: inline-flex; align-items: center; gap
 
 .impact { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); }
 .impact.hi { color: var(--red); }
+
+/* Lifecycle */
+.chain { margin: 24px 0 8px; border: 1px solid var(--line); border-radius: 12px; padding: 4px 20px 12px; }
+.chainhead { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; padding: 14px 0 8px; }
+.chainhead b { font-size: 16px; }
+.chainhead span { color: var(--muted); font-size: 13px; }
+.chainhead strong { margin-left: auto; font-size: 14px; }
+.chainhead .pos { color: var(--green); }
+.chainhead .neg { color: var(--red); }
+.inl { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pxin { width: 110px; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; }
