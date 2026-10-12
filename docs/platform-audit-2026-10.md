@@ -72,3 +72,29 @@ repository. "Verified" means checked against the live database or by running cod
   needs no inbound ports.
 - Whether a scheduler secret may be stored for the cron job.
 - Whether to retire the `research.backtest_*` tables.
+
+## P0 outcome (12 October 2026)
+
+Verified with `supabase/tests/trading_risk_gate.sql` against the live database (31 checks, 0 failures; the block rolls back and leaves every
+`trading` table empty).
+
+Additional defects found and fixed while testing, none visible in the first audit:
+
+- **A block could be downgraded.** `evaluate_pretrade_risk` assigned `blocked`, then later checks could overwrite it with `manual_review`
+  (reproduced: an unapproved setup with missing data, and a per-trade risk breach on an automated account, both came back `manual_review`).
+  A human can approve `manual_review` but never `blocked`, so a block could be approved and dispatched. Severity now only escalates.
+- **The gate checked the setup, not the request.** The new `trading.evaluate_execution_risk` validates the actual side, quantity, order
+  type, reference price, stop and take profit against the approved setup, requires a stop, rejects expired setups, enforces one live request
+  per setup, and treats a missing account limit as "no policy" (blocked), not "unlimited".
+- **Human approval could never succeed.** `trading.approve_paper_execution` failed with "column reference status is ambiguous" on every call.
+- **The dispatcher could not work** (service role has no access to the trading schema; the schema is not exposed to the API). Dispatch is now
+  one database transaction, `trading.dispatch_paper_execution`, reached through a single wrapper `public.dispatch_paper_execution`, which
+  re-runs the risk gate immediately before the fill. The Edge Function is a thin wrapper using only the caller's token. No privileges were
+  granted to `service_role`.
+- My own first version of the new gate failed on any rejected request (`blocked || 'text'` is read as an array literal). The tests caught it
+  before anything used it; fixed in migration `20261012083000`.
+
+Still open after P0: monetary risk is estimated from the setup's declared maximum loss, because `core.instruments` has no contract size and
+there are no broker specifications; there is no drawdown, correlation or margin check; there is no setup producer; there is no scheduler.
+The `request_execution` and `approve_paper_execution` functions have no API entry point yet (they need the same thin public wrappers when the
+operations view is built).
