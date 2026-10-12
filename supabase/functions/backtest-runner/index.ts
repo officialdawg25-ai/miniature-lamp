@@ -2,7 +2,10 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.0";
 import { alignAsOf, alignAsOfMaxAge, runBacktest, subtractSeries, type Num } from "./backtest.ts";
 
-const CODE_VERSION = "backtest-v4";
+const CODE_VERSION = "backtest-v5";
+// The stored gold series changes construction on this date (weekday-only two-decimal closes before, seven-day long-decimal
+// closes after, same provider). The level is continuous across it, but the two halves are not the same series.
+const GOLD_CONSTRUCTION_BREAK_MS = Date.parse("2013-03-27T00:00:00Z");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -146,6 +149,7 @@ Deno.serve(async (req: Request) => {
       yield_rows: yields.length, ...extra,
       days_with_signal: diff10.filter((v) => v !== null).length,
       close_checksum: Math.round(close.reduce((a, b) => a + b, 0) * 1000),
+      gold_series_construction_break_included: isGold && datesMs[0] < GOLD_CONSTRUCTION_BREAK_MS,
     };
     const years = close.length / 252;
     const longWindow = years >= 8;
@@ -178,6 +182,10 @@ Deno.serve(async (req: Request) => {
       "Yield availability times are conservative (two days after each date); real publication is faster, so results are if anything understated on timing.",
       ...common,
     ];
+
+    if (isGold && datesMs[0] < GOLD_CONSTRUCTION_BREAK_MS) {
+      caveats.unshift("DATA QUALITY: this window starts before 2013-03-27, when the stored gold series changes construction (Monday-Friday two-decimal closes before; seven-day long-decimal closes after, with slightly lower weekday volatility). The level is continuous at the join, but the two halves are not the same series. Start from 2015 or later for a single-construction test.");
+    }
 
     let storedId: string | null = null;
     if (persist) {
