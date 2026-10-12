@@ -141,3 +141,6 @@ Financial Modeling Prep's economic-calendar endpoint is refused on the free key 
 - `supabase/tests/paper_ticket.sql`: 11 checks. In the run, 10 passed; the eleventh (P7) failed only because the expected value in the test was wrong (0.316 instead of 0.633); the function returned the correct 0.6329 and the test was corrected.
 
 Not built: news feed, market sentiment beyond positioning, drawdown stop and correlated-exposure limits, order management after fill (trailing and partial exits), volatility-adjusted stops, ML models (no validated baseline exists to compare against), BLS-actual surprises.
+
+### News (2026-10-13)
+Alpha Vantage's NEWS_SENTIMENT endpoint is refused as premium on the saved key, and GDELT answers HTTP 429 from the shared Edge Function address. News therefore comes from the eight central banks' official RSS and Atom feeds (all eight verified, 74 articles in two weeks), refreshed every two hours (cron `news-central-banks-refresh`). No sentiment is stored because no validated scoring exists. Defect found and handled: the Bank of Canada feed lists scheduled events (holidays, conferences) with future dates; the database function now rejects anything dated more than an hour ahead, and reads exclude the rows stored before the guard. `news_upsert_articles` (first version) remains unused in the database.
