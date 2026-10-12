@@ -116,3 +116,14 @@ Pre-registered variant (third trial in the family) run once on USDJPY via `intel
 
 ## Interface redesign
 The terminal was restyled as a light, minimal theme: one calm palette (ink, a muted gold accent, hairline borders), a single card level instead of nested shells, key figures with hairline dividers instead of boxes, a quiet status row, and a responsive layout (drawer navigation under 900px, two-column key figures under 1100px, single column under 600px). Removed non-functional chrome (workspace picker, search and bell buttons, date, "Analyst workspace" block). The overview dashboard now shows only on Market overview; before, it rendered underneath every page. No behaviour or data logic changed.
+
+## Control layer and live chart (2026-10-13)
+
+Readiness assessment against the master specification: the platform could observe and record but not be operated. Row counts confirmed no economic calendar feed with forecasts (`economic_releases` 6, `surprise_statistics` 0), no news (`news_events` 0), no central-bank decisions (`policy_decisions` 0), no regime states, no ML models or predictions, and no trade setups or trades. Limits lived only in SQL.
+
+Added in this step:
+- `trading.accounts.operating_mode` (research, paper, demo, restricted_live), `kill_switch`, with owner-checked, validated, audited functions `update_risk_policy`, `set_account_mode`, `set_kill_switch` and read function `get_account_controls`. The risk gate blocks on kill switch, research mode and live mode; the execution host hands out nothing under a kill switch or outside demo mode. Live and automated execution cannot be selected from the interface. 12 checks in `supabase/tests/account_controls.sql`; the existing 31 gate and 22 bridge checks still pass.
+- Controls page (`ControlsPanel`).
+- Edge function `live-candles` (read only, vendor key server side, 10 s cache) and a Live chart page drawing candles with the owner's SMC and Fibonacci levels (`src/smc.js`, 6 tests). The overlay is an annotation, not an approved signal. Candles are vendor mid quotes polled every 20 s; this is near-real-time, not tick streaming.
+
+Not yet built: drawdown stop, correlated-exposure limit, economic calendar with consensus, news, sentiment page, regime detection, lifecycle timeline per decision, paper-trading engine, ML layer.
