@@ -107,3 +107,6 @@ operations view is built).
 
 ## Intraday data and the SMC + Fibonacci test
 15-minute bars for USDJPY (from 2023-08) and XAUUSD (from 2023-09) were backfilled from Twelve Data with one request per call (about 17 calls per symbol, temporary job removed). Vendor data includes weekend bars (excluded) and, for gold, a few suspect bars. `intelligence.smc_fib_backtest` implements the owner's rules mechanically. Result, run once per symbol with rules frozen first: USDJPY 304 trades, mean -0.49R, profit factor 0.28; XAUUSD 36 trades, mean -0.83R. Recorded as retired in the ledger.
+
+## SMC + Fibonacci, target at the leg extreme
+Pre-registered variant (third trial in the family) run once on USDJPY via `intelligence.smc_fib_backtest_v2`: 301 trades, win rate 15.6% vs 20% break-even, mean -0.23R (t = -2.09), profit factor 0.74, -25.81 USD at 0.01 lot. Retired.
