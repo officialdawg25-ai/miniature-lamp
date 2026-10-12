@@ -104,3 +104,6 @@ operations view is built).
 
 ## Intraday data (status)
 `intraday-ingestion` builds 5-minute bars from Dukascopy tick files (decoder and bar builder unit-tested). In production the first call returned HTTP 429 and the next timed out, so the source is throttling the shared Edge egress. No intraday bars are stored yet. Options: slow background crawl, a free-tier API key from another vendor, or exporting from MT5 once an execution host exists.
+
+## Intraday data and the SMC + Fibonacci test
+15-minute bars for USDJPY (from 2023-08) and XAUUSD (from 2023-09) were backfilled from Twelve Data with one request per call (about 17 calls per symbol, temporary job removed). Vendor data includes weekend bars (excluded) and, for gold, a few suspect bars. `intelligence.smc_fib_backtest` implements the owner's rules mechanically. Result, run once per symbol with rules frozen first: USDJPY 304 trades, mean -0.49R, profit factor 0.28; XAUUSD 36 trades, mean -0.83R. Recorded as retired in the ledger.
