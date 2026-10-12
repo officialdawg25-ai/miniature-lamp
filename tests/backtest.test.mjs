@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   alignAsOf, rollingZ, changeOver, momentum, positionsFor, forwardReturns, simulate, metrics, walkForward,
-  runBacktest, bootstrapSharpeCI, shiftPermutationP, deflatedSharpe, normCdf, normInv, mulberry32, CONFIGS,
+  runBacktest, alignAsOfMaxAge, subtractSeries, bootstrapSharpeCI, shiftPermutationP, deflatedSharpe, normCdf, normInv, mulberry32, CONFIGS,
 } from '../supabase/functions/backtest-runner/backtest.ts';
 
 const gauss = (rnd) => Math.sqrt(-2 * Math.log(1 - rnd())) * Math.cos(2 * Math.PI * rnd());
@@ -189,4 +189,35 @@ test('an inverse relationship (higher signal -> lower price) is only found with 
   }
   assert.ok(right >= 4, `matching prior found the edge in ${right}/${seeds}`);
   assert.ok(wrong <= 1, `wrong prior still looked good in ${wrong}/${seeds}`);
+});
+
+// ---- max-age alignment and series subtraction (policy-rate differential) -------------------------------------------
+import { alignAsOfMaxAge as maxAge, subtractSeries as sub } from '../supabase/functions/backtest-runner/backtest.ts';
+
+test('max-age alignment returns missing once a value is older than the limit, and never a future value', () => {
+  const day = 86400000;
+  const f = [{ availableAtMs: 10 * day, value: 1 }, { availableAtMs: 20 * day, value: 2 }];
+  const dates = [5, 10, 15, 19, 20, 29, 30, 31].map((d) => d * day);
+  assert.deepEqual(maxAge(f, dates, 10 * day), [null, 1, 1, 1, 2, 2, 2, null]);
+});
+
+test('max-age alignment with a huge limit matches plain as-of alignment', () => {
+  const f = [{ availableAtMs: 100, value: 1 }, { availableAtMs: 200, value: 2 }, { availableAtMs: 300, value: null }];
+  const d = [50, 100, 150, 199, 200, 250, 300, 400];
+  assert.deepEqual(maxAge(f, d, 1e15), alignAsOf(f, d));
+});
+
+test('series subtraction is missing when either side is missing', () => {
+  assert.deepEqual(sub([4, null, 3, 5], [1, 2, null, 2.5]), [3, null, null, 2.5]);
+});
+
+test('a policy-differential signal never uses a rate before it was available or after it went stale', () => {
+  const day = 86400000;
+  const fed = [{ availableAtMs: 0, value: 4 }, { availableAtMs: 50 * day, value: 4.25 }];
+  const boj = [{ availableAtMs: 0, value: 0.25 }, { availableAtMs: 60 * day, value: 0.75 }];
+  const dates = [5, 49, 50, 59, 60, 61].map((d) => d * day);
+  const diff = sub(maxAge(fed, dates, 14 * day), maxAge(boj, dates, 10 * day));
+  // day 5: both fresh -> 4 - 0.25. day 49: Fed value is 49 days old -> missing. day 50: BoJ value is 50 days old -> missing.
+  // day 59: BoJ still stale -> missing. day 60: new BoJ value 0.75 and Fed 4.25 (10 days old) -> 3.5. day 61: same.
+  assert.deepEqual(diff, [3.75, null, null, null, 3.5, 3.5]);
 });

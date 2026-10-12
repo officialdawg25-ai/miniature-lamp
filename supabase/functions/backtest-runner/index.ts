@@ -1,8 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.0";
-import { alignAsOf, runBacktest, type Num } from "./backtest.ts";
+import { alignAsOf, alignAsOfMaxAge, runBacktest, subtractSeries, type Num } from "./backtest.ts";
 
-const CODE_VERSION = "backtest-v2";
+const CODE_VERSION = "backtest-v3";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -45,13 +45,17 @@ Deno.serve(async (req: Request) => {
     const symbol = String(body.symbol ?? "USDJPY").toUpperCase();
     if (symbol !== "USDJPY" && symbol !== "XAUUSD") return json(400, { ok: false, error: "UNSUPPORTED_SYMBOL", request_id: requestId });
     const isGold = symbol === "XAUUSD";
+    const signalKind = String(body.signal ?? "yield");
+    if (signalKind !== "yield" && signalKind !== "policy") return json(400, { ok: false, error: "UNSUPPORTED_SIGNAL", supported: ["yield", "policy"], request_id: requestId });
+    if (isGold && signalKind === "policy") return json(400, { ok: false, error: "POLICY_SIGNAL_IS_USDJPY_ONLY", request_id: requestId });
+    const isPolicy = !isGold && signalKind === "policy";
     const defaultCost = isGold ? 2 : 1;
     const costBp = Number.isFinite(Number(body.cost_bp)) ? Math.min(Math.max(Number(body.cost_bp), 0), 20) : defaultCost;
     const reps = Math.min(Math.max(Math.floor(Number(body.reps ?? 500)), 100), 1000);
     const seed = Math.floor(Number(body.seed ?? 42));
     const start = String(body.start_date ?? "2021-01-01");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return json(400, { ok: false, error: "INVALID_START_DATE", request_id: requestId });
-    const params = { symbol, start_date: start, cost_bp: costBp, reps, seed, init_train_days: 504, test_block_days: 63, holdout_days: 252, timeframe: "daily", signal: isGold ? "us_10y_real_yield" : "us_jp_10y_differential" };
+    const params = { symbol, start_date: start, cost_bp: costBp, reps, seed, init_train_days: 504, test_block_days: 63, holdout_days: 252, timeframe: "daily", signal: isGold ? "us_10y_real_yield" : isPolicy ? "us_jp_policy_rate_differential" : "us_jp_10y_differential" };
 
     const { data: instrument, error: instrumentError } = await sb.schema("core").from("instruments").select("id").eq("symbol", symbol).eq("active", true).maybeSingle();
     if (instrumentError || !instrument) return json(500, { ok: false, error: "INSTRUMENT_NOT_FOUND", request_id: requestId });
@@ -104,13 +108,35 @@ Deno.serve(async (req: Request) => {
       diff10 = alignAsOf(diffFeatures, datesMs);
       carry = alignAsOf(carryFeatures, datesMs).map((c) => c ?? 0);
       extra = { yield_rows_stale: yields.filter((r) => r.jp_stale).length };
+      if (isPolicy) {
+        // Signal = Fed target (upper bound) minus the Bank of Japan overnight call rate, each aligned as-of its own
+        // availability time. A rate not refreshed for longer than the age limit counts as missing. The carry proxy above is
+        // unchanged so results stay comparable with the yield-differential run.
+        const { data: banks, error: banksError } = await sb.schema("macro").from("central_banks").select("id,code").in("code", ["FED", "BOJ"]);
+        if (banksError || !banks || banks.length !== 2) return json(500, { ok: false, error: "CENTRAL_BANKS_NOT_FOUND", request_id: requestId });
+        const feats: Record<string, { availableAtMs: number; value: Num }[]> = {};
+        const counts: Record<string, number> = {};
+        for (const b of banks) {
+          const rows = await fetchAll<{ available_at: string; rate: number | string }>((from, to) =>
+            sb.schema("macro").from("policy_rate_observations").select("available_at,rate").eq("central_bank_id", b.id)
+              .order("available_at", { ascending: true }).range(from, to));
+          feats[b.code as string] = rows.map((r) => ({ availableAtMs: Date.parse(r.available_at), value: num(r.rate) as Num }));
+          counts[b.code as string] = rows.length;
+        }
+        if ((counts.FED ?? 0) < 300 || (counts.BOJ ?? 0) < 300) return json(422, { ok: false, error: "INSUFFICIENT_POLICY_RATE_HISTORY", rows: counts, request_id: requestId });
+        const day = 86400000;
+        const fed = alignAsOfMaxAge(feats.FED, datesMs, 14 * day);
+        const boj = alignAsOfMaxAge(feats.BOJ, datesMs, 10 * day);
+        diff10 = subtractSeries(fed, boj);
+        extra = { ...extra, policy_rows_fed: counts.FED, policy_rows_boj: counts.BOJ, fed_max_age_days: 14, boj_max_age_days: 10 };
+      }
     }
 
     const needed = params.init_train_days + params.test_block_days * 2 + params.holdout_days + 1;
     if (close.length < needed) return json(422, { ok: false, error: "INSUFFICIENT_PRICE_HISTORY", bars: close.length, needed, request_id: requestId });
     if (close.some((c) => !Number.isFinite(c) || c <= 0)) return json(422, { ok: false, error: "INVALID_PRICE_VALUES", request_id: requestId });
 
-    const result = runBacktest({ close, diff10, signalSign: isGold ? -1 : 1 }, carry, { initTrain: params.init_train_days, testBlock: params.test_block_days, holdout: params.holdout_days, costBp, reps, seed, signalName: isGold ? "real_yield" : undefined });
+    const result = runBacktest({ close, diff10, signalSign: isGold ? -1 : 1 }, carry, { initTrain: params.init_train_days, testBlock: params.test_block_days, holdout: params.holdout_days, costBp, reps, seed, signalName: isGold ? "real_yield" : isPolicy ? "policy_diff" : undefined });
     const bars = { length: close.length };
     const yields = { length: yieldRowCount };
 
@@ -131,6 +157,13 @@ Deno.serve(async (req: Request) => {
       "Gold has no carry term here, so only the price move is earned. Spot gold carries financing and storage-type costs that are not modelled.",
       "The stored gold series has weekend rows, which spot gold does not trade on; they are excluded, and the closes are daily values from a single provider, not exchange settlement prices.",
       "Real-yield availability times are conservative (two days after each date), so results are if anything understated on timing.",
+      ...common,
+    ] : isPolicy ? [
+      "The signal is the Fed target (upper bound) minus the Bank of Japan overnight call rate. The BoJ figure is a market rate that tracks the policy rate, not the policy target itself.",
+      "Policy rates move in a handful of steps, so the number of independent changes behind this signal is small even though there are many daily observations. That limits what any test can conclude.",
+      "The sample is one market regime: USDJPY trended strongly higher, so any long-biased rule benefits. Compare with buy-and-hold, not with zero.",
+      "Carry is the same proxy as the yield-differential run (US 2Y minus Japan 2Y yields), so the two runs are comparable.",
+      "This is another hypothesis tested on the same price history. Every run, stored or not, adds to the multiple-testing problem; the correction here counts only the nine rules inside this run.",
       ...common,
     ] : [
       "The sample is one market regime: USDJPY trended strongly higher, so any long-biased rule benefits. Compare with buy-and-hold, not with zero.",

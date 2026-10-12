@@ -21,6 +21,23 @@ export function alignAsOf(features: { availableAtMs: number; value: Num }[], dat
   return out;
 }
 
+// Like alignAsOf, but a value whose availability is older than maxAgeMs relative to the date counts as missing (null) instead
+// of being carried forward silently. Used so a rate series that stopped updating cannot keep feeding a rule.
+export function alignAsOfMaxAge(features: { availableAtMs: number; value: Num }[], datesMs: number[], maxAgeMs: number): Num[] {
+  const out: Num[] = new Array(datesMs.length).fill(null);
+  let j = -1;
+  for (let i = 0; i < datesMs.length; i++) {
+    while (j + 1 < features.length && features[j + 1].availableAtMs <= datesMs[i]) j++;
+    out[i] = j >= 0 && datesMs[i] - features[j].availableAtMs <= maxAgeMs ? features[j].value : null;
+  }
+  return out;
+}
+
+// Elementwise a - b, null when either side is missing.
+export function subtractSeries(a: Num[], b: Num[]): Num[] {
+  return a.map((v, i) => (v === null || b[i] === null || b[i] === undefined ? null : v - (b[i] as number)));
+}
+
 // ---- features (each value at t uses data up to and including t only) ----------------------------------------
 export function rollingZ(x: Num[], window: number): Num[] {
   const out: Num[] = new Array(x.length).fill(null);
