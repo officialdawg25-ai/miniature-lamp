@@ -332,3 +332,5 @@ main > .content > footer > span { display: inline-flex; align-items: center; gap
 .seg button:first-child { border-left: 0; }
 .seg button.on { background: var(--ink); color: var(--bg); }
 .ctlrow { align-items: flex-end; }
+
+.spark { display: block; max-width: 100%; }

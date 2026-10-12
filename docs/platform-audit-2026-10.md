@@ -127,3 +127,6 @@ Added in this step:
 - Edge function `live-candles` (read only, vendor key server side, 10 s cache) and a Live chart page drawing candles with the owner's SMC and Fibonacci levels (`src/smc.js`, 6 tests). The overlay is an annotation, not an approved signal. Candles are vendor mid quotes polled every 20 s; this is near-real-time, not tick streaming.
 
 Not yet built: drawdown stop, correlated-exposure limit, economic calendar with consensus, news, sentiment page, regime detection, lifecycle timeline per decision, paper-trading engine, ML layer.
+
+### Macro pages (2026-10-13)
+`public.get_macro_intelligence()` returns one read-only snapshot (policy rates for 8 banks, US and Japan yields and the 10Y spread, CFTC leveraged-fund positioning with a 5-year percentile using only reports already available, the release calendar and the latest US indicator prints). Five pages now read it: Central bank policy, Yield differentials, COT positioning, Inflation & growth and a new Economic calendar. Verified against production data (8 banks, 5 yield series, 7 currencies, 13 upcoming releases, 11 indicators). Still missing and stated on the pages: consensus and forecasts, non-US data, meeting dates and statements, market-implied rate paths, year-over-year transforms, news and sentiment beyond positioning.
