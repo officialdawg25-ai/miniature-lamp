@@ -60,3 +60,29 @@ class Logic(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Snapshot(unittest.TestCase):
+    def test_snapshot_shape_and_suffix(self):
+        info = NS(balance=15.0, equity=14.8, margin=0.5, margin_free=14.3, currency="USD")
+        pos = [NS(ticket=11, symbol="USDJPYm", type=0, volume=0.01, price_open=150.1, sl=149.6, tp=151.0, profit=-0.2, comment="rqabc")]
+        orders = [NS(ticket=12, symbol="XAUUSDm", type=2, volume_current=0.01, price_open=4100.0, sl=0.0, tp=0.0, comment="")]
+        s = h.build_snapshot(info, pos, orders, "m")
+        self.assertEqual(s["positions"][0]["symbol"], "USDJPY")
+        self.assertEqual(s["positions"][0]["side"], "buy")
+        self.assertEqual(s["orders"][0]["symbol"], "XAUUSD")
+        self.assertEqual(s["equity"], 14.8)
+
+    def test_missing_stop_is_reported_as_zero(self):
+        info = NS(balance=1, equity=1, margin=0, margin_free=1, currency="USD")
+        pos = [NS(ticket=1, symbol="X", type=1, volume=0.01, price_open=1.0, sl=None, tp=None, profit=0, comment=None)]
+        s = h.build_snapshot(info, pos, [], "")
+        self.assertEqual((s["positions"][0]["sl"], s["positions"][0]["comment"], s["positions"][0]["side"]), (0.0, "", "sell"))
+
+    def test_deals_skip_non_trade_types(self):
+        d = [NS(ticket=1, position_id=0, symbol="", type=2, entry=0, volume=0, price=0, profit=15, commission=0, swap=0, time=1700000000, comment="deposit"),
+             NS(ticket=2, position_id=77, symbol="USDJPYm", type=1, entry=1, volume=0.01, price=150.0, profit=-0.4, commission=0, swap=0, time=1700000100, comment="rqabc")]
+        out = h.build_deals(d, "m")
+        self.assertEqual(len(out), 1)
+        self.assertEqual((out[0]["symbol"], out[0]["side"], out[0]["entry"], out[0]["position_ticket"]), ("USDJPY", "sell", "out", 77))
+        self.assertTrue(out[0]["deal_time"].startswith("2023-11-14"))

@@ -38,6 +38,17 @@ Deno.serve(async (req: Request) => {
       if (error) return json(500, { ok: false, error: "CLAIM_FAILED", message: error.message.slice(0, 160) });
       return json(200, { ok: true, mode: "demo", requests: data });
     }
+    if (body.action === "snapshot") {
+      const snap = typeof body.snapshot === "object" && body.snapshot ? body.snapshot : {};
+      const { data, error } = await sb.rpc("host_report_snapshot", { p_host_id: h.host_id, p_snapshot: snap });
+      if (error) return json(400, { ok: false, error: "SNAPSHOT_REJECTED", message: error.message.slice(0, 160) });
+      return json(200, { ok: true, ...data });
+    }
+    if (body.action === "deals") {
+      const { data, error } = await sb.rpc("host_report_deals", { p_host_id: h.host_id, p_deals: Array.isArray(body.deals) ? body.deals : [] });
+      if (error) return json(400, { ok: false, error: "DEALS_REJECTED", message: error.message.slice(0, 160) });
+      return json(200, { ok: true, deals_received: data });
+    }
     if (body.action === "report") {
       const state = String(body.state ?? "");
       const id = String(body.request_id ?? "");
@@ -46,7 +57,7 @@ Deno.serve(async (req: Request) => {
       if (error) return json(409, { ok: false, error: "REPORT_REFUSED", message: error.message.slice(0, 160) });
       return json(200, { ok: true, result: data });
     }
-    return json(400, { ok: false, error: "UNKNOWN_ACTION", actions: ["ping", "sync_specs", "claim", "report"] });
+    return json(400, { ok: false, error: "UNKNOWN_ACTION", actions: ["ping", "sync_specs", "claim", "report", "snapshot", "deals"] });
   } catch (e) {
     return json(500, { ok: false, error: "HOST_API_FAILED", message: e instanceof Error ? e.message.slice(0, 100) : "unknown" });
   }
