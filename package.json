@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test tests/vintage.test.mjs tests/yields.test.mjs tests/backtest.test.mjs tests/policy.test.mjs tests/shared-code.test.mjs tests/policy-global.test.mjs",
+    "test": "node --test tests/vintage.test.mjs tests/yields.test.mjs tests/backtest.test.mjs tests/policy.test.mjs tests/shared-code.test.mjs tests/policy-global.test.mjs tests/cot.test.mjs",
     "lint": "npx -y eslint@9 src"
   },
   "dependencies": {
