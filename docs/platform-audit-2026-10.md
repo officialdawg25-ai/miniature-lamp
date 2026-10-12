@@ -1,0 +1,74 @@
+# Platform audit: trading lifecycle state (12 October 2026)
+
+Evidence-based map of what exists, what works and what is missing, taken from the live Supabase project (`ieocpcapgwusbojzrrxr`) and this
+repository. "Verified" means checked against the live database or by running code. Everything else is labelled as inferred.
+
+## Status by lifecycle stage
+
+| Stage | State | Evidence |
+|---|---|---|
+| Data: FX prices | Operational | 10 pairs, daily, USDJPY complete 2008 to 2026 (260-262 bars per year, no gaps over 4 days) |
+| Data: gold | Partially reliable | 5,419 closes; series changes construction on 2013-03-27 (see backtest caveat) |
+| Data: US and Japan yields | Operational | 23,159 rows, 2008 to 2026-10-08, availability times stored |
+| Data: policy rates | Operational (Fed, BoJ only) | 11,097 rows; BoJ is a market call rate, not the target; 6 other banks missing |
+| Data: macro releases | Partial | 279 provider observations, 7,113 ALFRED vintages (6,902 promoted to scheduled-time availability), 109 factor points |
+| Data: positioning (COT), sentiment, intervention, news | Missing | `market.news_events` has 0 rows; no COT or intervention source exists |
+| Fundamental interpretation | Partial | factor engine v2 stores 109 US inflation and labour points; `intelligence.currency_scores` has 0 rows |
+| Regime detection | Not operational | `intelligence.regime_states` has 0 rows |
+| Opportunity discovery | Missing | nothing writes `trading.trade_setups` (0 rows, no producer function) |
+| Strategy lifecycle | Missing | no strategy or hypothesis registry; three nulls were run but nothing was stored |
+| Backtesting | Operational, research-grade | `backtest-runner` v6, walk-forward, holdout, bootstrap, timing test, deflated Sharpe |
+| ML | Scaffolding only | `ml.feature_definitions` has 9 rows; `feature_values`, `model_versions`, `predictions` have 0 |
+| Portfolio construction | Missing | no exposure or correlation logic |
+| Risk authorization | Partial | SQL gate exists, with gaps listed below |
+| Execution | Paper simulation in SQL; MT5 missing | simulate/approve functions exist; dispatcher Edge Function cannot run (grants); no MT5 bridge |
+| Monitoring | Missing | no scheduler (pg_cron is not installed), no heartbeats, no reconciliation |
+| Attribution and learning | Missing | `trading.paper_account_summary` only; no performance engine |
+| Frontend | Research views operational; trading UI absent | "Paper trading" nav entry renders no panel (code inspection) |
+
+## Findings (verified unless marked)
+
+1. **The paper-execution dispatcher cannot work.** `service_role` has no USAGE on schema `trading` and no table privileges on it, but the
+   `paper-execution-dispatcher` Edge Function reads and updates `trading.*` tables with the service key. Its first query fails. All
+   `trading` tables are empty, so it has never run.
+2. **The pre-trade risk gate checks the setup, not the request.** `trading.evaluate_pretrade_risk(account, setup)` compares the setup's own
+   `maximum_loss` to the account limit. `trading.request_execution` accepts the quantity, stop and side from the caller and never compares
+   them with the approved setup, and does not require a stop loss. A request with a larger quantity than the setup's `position_size`
+   would pass.
+3. **The gate is incomplete for the target design.** No aggregate open risk, correlated exposure, margin or leverage, drawdown, stale-data,
+   spread or event-risk checks. Monetary risk cannot be computed anyway: `core.instruments.contract_size` is null and there are no
+   broker specifications.
+4. **Nothing produces setups, and no scheduler exists.** The lifecycle stops before the first trading table.
+5. **Open read policies (fixed).** Nine policies used a bare `true`. They were not reachable (authenticated users have no schema USAGE on
+   `ml` or `research`), but `core.*` were readable by any signed-in user. Fixed in migration `20261012071430` and tested with the
+   approved user (full access) and a stranger (none).
+6. **Duplicate backtest storage.** `research.backtest_runs` and `research.backtest_trades` (empty, unreachable by API roles) overlap with
+   `intelligence.backtest_runs` (empty, written by `backtest-runner`). Needs a decision before either is used.
+7. **Repository does not track most of the backend.** 125 migrations are applied in the database; 11 are in the repository. 6 of 24
+   deployed Edge Functions are in the repository.
+8. **Security posture that is sound:** browser role has SELECT only on `trading.*`, scoped by account membership; all writes go through
+   SECURITY DEFINER functions; `trading.execution_audit_events` is append-only by trigger; execution status transitions are guarded by a
+   trigger; paper approval requires an owner or risk manager and cannot override a blocked decision.
+
+## Prioritised plan
+
+- **P0 safety:** make the risk gate validate the actual request against the approved setup and require a stop; move the dispatcher onto
+  SECURITY DEFINER RPCs so no table privileges are granted to `service_role`; prove with tests that a rejected request cannot reach
+  execution.
+- **P1 research governance:** a hypothesis and experiment ledger (store every run, including nulls); consolidate backtest storage.
+- **P2 decision record:** a decision engine that writes an auditable outcome (approved, wait, no trade, rejected, insufficient data) with
+  reason codes. Today the correct output is "no trade" for every instrument, because no strategy has passed validation.
+- **P3 data for new hypotheses:** policy rates for the other six central banks (for cross-sectional carry), CFTC positioning with its
+  publication lag, event calendar.
+- **P4 operations:** scheduler with a stored secret, heartbeats, stale-data detection.
+- **P5 execution (needs owner decisions):** MT5 bridge on a demo account. See the boundary below.
+- **P6 frontend:** an operations view bound to real state (decisions, risk, paper positions, service health).
+
+## Decisions that need the owner
+
+- Where the MT5 terminal will run (the Python MT5 package needs Windows) and which broker/demo account. Credentials must never be sent in
+  chat or stored in the browser; they stay on the execution host.
+- Whether to use a pull model (execution host polls Supabase over outbound HTTPS with a narrowly scoped credential). Recommended, since it
+  needs no inbound ports.
+- Whether a scheduler secret may be stored for the cron job.
+- Whether to retire the `research.backtest_*` tables.
