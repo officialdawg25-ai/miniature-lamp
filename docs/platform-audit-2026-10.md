@@ -188,3 +188,15 @@ Both retired. Gold session drift is the strongest result in the programme, but i
 Forward test `xauusd-asia-london-session-drift-forward`: the unchanged rule (0.40 USD/oz cost) on trading days from 2026-10-14. `intraday-twelvedata` has a forward mode (from the newest stored bar, closed bars only), run hourly on weekdays for XAUUSD and USDJPY (crons `intraday-forward-xauusd`, `intraday-forward-usdjpy`); first call stored 34 closed bars each. `intelligence.run_gold_session_forward` stores a monthly interim run (cron `gold-session-forward-monthly`, monitoring only) and the decision is taken once at 250 days with the same checks plus the Welch session benchmark. The rule has no stop; a tradable version would need its own registered risk design under the account policy.
 
 Programme total: 19 hypotheses (18 retired, plain G8 carry at "tested", the forward test collecting data). None research-validated.
+
+### Batch 5: USDJPY local-hours depreciation (2026-10-13)
+Direction from Breedon and Ranaldo (2013): currencies tend to weaken during their home market's hours. The session theme was prompted by the gold result (disclosed in the specification); no USDJPY session returns were looked at before registration. Runner `intelligence.run_batch5` on `intelligence.usdjpy_session_windows()`, costs 1.8 pips (stress 3.6), alpha 0.05/2.
+
+| Hypothesis | Days | Mean net | t | Checks |
+|---|---|---|---|---|
+| usdjpy-tokyo-hours-jpy-depreciation (long 00:00-07:00 UTC) | 1,539 | -1.02 pips | -0.94 | 2 of 9 (halves +1.32 / -3.36, holdout -3.14, PF 0.93; Tokyo +0.78 vs New York +2.34 gross, Welch p 0.82) |
+| usdjpy-new-york-hours-usd-depreciation (short 13:00-21:00 UTC) | 1,482 | -4.14 pips | -3.19 | 1 of 9 (USDJPY rose more in New York, +2.34, than in London, +1.46) |
+
+Both retired. Over 2020-2026 the dollar's rise against the yen happened mostly in New York hours, the opposite of the published pattern, and no session window covers a 1.8-pip cost on its own.
+
+Programme total: 21 hypotheses (20 retired, plain G8 carry at "tested", the gold forward test collecting data). None research-validated.
