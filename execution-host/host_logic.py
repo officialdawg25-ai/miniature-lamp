@@ -95,11 +95,22 @@ def strip_suffix(symbol: str, suffix: str) -> str:
     return symbol[: -len(suffix)] if suffix and symbol.endswith(suffix) else symbol
 
 
+def account_terms(info) -> dict:
+    """Broker terms MT5 reports for the logged-in account: leverage and the margin-call and stop-out levels (margin_so_mode 0 = percent, 1 = money).
+    Missing attributes become None, never a guessed value."""
+    def num(name, cast=float):
+        v = getattr(info, name, None)
+        return None if v is None else cast(v)
+    return {"leverage": num("leverage", int), "margin_level": num("margin_level"), "margin_call_level": num("margin_so_call"),
+            "stop_out_level": num("margin_so_so"), "margin_so_mode": num("margin_so_mode", int)}
+
+
 def build_snapshot(info, positions, orders, suffix: str = "") -> dict:
     """Account state for the platform. `positions` and `orders` are MT5 result tuples (or any objects with the same attributes)."""
     return {
         "balance": float(info.balance), "equity": float(info.equity), "margin_used": float(info.margin), "free_margin": float(info.margin_free),
         "currency": info.currency,
+        "terms": account_terms(info),
         "positions": [
             {"ticket": int(p.ticket), "symbol": strip_suffix(p.symbol, suffix), "side": "buy" if int(p.type) == 0 else "sell", "volume": float(p.volume),
              "price_open": float(p.price_open), "sl": float(p.sl or 0), "tp": float(p.tp or 0), "profit": float(p.profit), "comment": p.comment or ""}

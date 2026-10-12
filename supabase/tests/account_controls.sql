@@ -5,6 +5,8 @@ begin
   select id into inst from core.instruments where symbol = 'USDJPY';
   insert into trading.trade_setups(instrument_id, as_of, side, status, account_id) values (inst, now(), 'long', 'candidate', acct) returning id into sx;
   select user_id into uid from trading.account_members where account_id = acct and role = 'owner' and active limit 1;
+  -- These checks exercise the manual dollar policy, so the automatic engine is switched off inside this rolled-back test.
+  update trading.accounts set metadata = jsonb_set(metadata, '{risk_policy,enabled}', 'false'::jsonb) where id = acct and metadata ? 'risk_policy';
   perform set_config('request.jwt.claims', json_build_object('sub', uid, 'role', 'authenticated')::text, true);
   r := public.get_account_controls();
   res := array_append(res, format('C1 controls readable: %s', case when jsonb_array_length(r->'accounts') = 1 and (r->'accounts'->0->>'operating_mode') = 'demo' then 'PASS' else 'FAIL '||r::text end));
