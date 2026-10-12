@@ -23,6 +23,7 @@ SUFFIX = os.environ.get("SYMBOL_SUFFIX", "")          # some brokers append a su
 SEND_ORDERS = os.environ.get("SEND_DEMO_ORDERS", "0") == "1"   # default is a dry run: orders are checked, never sent
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "15"))
 STOP_FILE = os.environ.get("STOP_FILE", "STOP")        # create this file to stop the host at the next poll
+STATE_SECONDS = int(os.environ.get("STATE_SECONDS", "300"))   # how often account state and closed deals are reported
 
 
 def api(action: str, **payload) -> dict:
@@ -67,6 +68,22 @@ def sync_specs(mt5, account_currency: str) -> None:
         specs.append(logic.spec_from_symbol_info(base, info, account_currency))
     if specs:
         log(f"synced {api('sync_specs', specs=specs).get('specs_upserted')} symbol specifications")
+
+
+def report_state(mt5, deals_days: int = 7) -> None:
+    """Send the account snapshot and recent trade deals. The platform stores a snapshot only when something changed or 5 minutes passed."""
+    info = mt5.account_info()
+    if info is None:
+        return
+    snap = logic.build_snapshot(info, mt5.positions_get(), mt5.orders_get(), SUFFIX)
+    result = api("snapshot", snapshot=snap)
+    for flag in result.get("flags", []):
+        log(f"RECONCILIATION {flag.get('severity', '').upper()} {flag.get('code')}: {flag.get('detail')}")
+    now = time.time()
+    deals = mt5.history_deals_get(now - deals_days * 86400, now + 3600)
+    batch = logic.build_deals(deals, SUFFIX)
+    for i in range(0, len(batch), 200):
+        api("deals", deals=batch[i:i + 200])
 
 
 def already_ordered(mt5, request_id: str) -> bool:
@@ -127,10 +144,19 @@ def main() -> None:
         if si is not None:
             specs[base] = logic.spec_from_symbol_info(base, si, info.currency)
     failures = 0
+    last_state = 0.0
     while not os.path.exists(STOP_FILE):
         try:
-            for req in api("claim", limit=5).get("requests", []):
+            # State first: the platform blocks new requests when its broker snapshot is more than 15 minutes old.
+            if time.time() - last_state >= STATE_SECONDS:
+                report_state(mt5)
+                last_state = time.time()
+            claimed = api("claim", limit=5).get("requests", [])
+            for req in claimed:
                 handle(mt5, req, specs)
+            if claimed:
+                report_state(mt5)
+                last_state = time.time()
             failures = 0
         except Exception as e:  # keep running; back off if the platform or MT5 is unavailable
             failures += 1

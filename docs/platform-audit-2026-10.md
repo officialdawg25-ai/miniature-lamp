@@ -110,3 +110,6 @@ operations view is built).
 
 ## SMC + Fibonacci, target at the leg extreme
 Pre-registered variant (third trial in the family) run once on USDJPY via `intelligence.smc_fib_backtest_v2`: 301 trades, win rate 15.6% vs 20% break-even, mean -0.23R (t = -2.09), profit factor 0.74, -25.81 USD at 0.01 lot. Retired.
+
+## Broker-state reconciliation
+`20261012210000`/`20261012220000`/`20261012230000`: broker snapshots and deals tables, reconciliation flags, risk gate uses broker state for accounts with a host (stale snapshot blocks, broker positions and in-flight requests count toward the open-trade limit, realized broker losses count toward daily and weekly limits), and the Operations page shows host status, broker state, flags and deals. Tests: `supabase/tests/execution_host_bridge.sql` (22 checks) and `trading_risk_gate.sql` (31 checks) pass.

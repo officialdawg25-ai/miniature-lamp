@@ -44,5 +44,11 @@ select trading.register_execution_host('<account id>', 'exness-demo-vps', '<TOKE
 ## Tests
 `python -m unittest test_host_logic` (no MetaTrader needed).
 
+## Reconciliation and fail-safes
+Every 5 minutes (and after each handled request) the host reports the account balance, equity, open positions, pending orders and the last 7 days of trade deals. The platform:
+- flags positions without a stop loss, positions it did not open, request tags it does not recognise, and acknowledged requests that never show up at the broker;
+- counts broker positions, pending orders and in-flight requests toward the open-trade limit, and realized broker losses toward the daily and weekly loss limits;
+- **blocks every new request for the account if the last snapshot is older than 15 minutes**, so a host that goes offline cannot leave the platform trading on stale state.
+
 ## What it does not do yet
-It does not reconcile broker positions back into the platform's position and P&L tables, and it does not manage open orders after they are placed. Those are the next pieces.
+It does not manage orders or positions after they are placed (no trailing, no early close), and it does not create platform trade or position rows from broker fills; the broker mirror (snapshots and deals) is the source of truth for demo accounts.

@@ -89,3 +89,43 @@ def worse_than_reference(req: dict, bid: float, ask: float, tick_size: float, ma
     live = ask if req["side"] == "long" else bid
     adverse = (live - float(req["price"])) if req["side"] == "long" else (float(req["price"]) - live)
     return adverse > max_slippage_ticks * tick_size
+
+
+def strip_suffix(symbol: str, suffix: str) -> str:
+    return symbol[: -len(suffix)] if suffix and symbol.endswith(suffix) else symbol
+
+
+def build_snapshot(info, positions, orders, suffix: str = "") -> dict:
+    """Account state for the platform. `positions` and `orders` are MT5 result tuples (or any objects with the same attributes)."""
+    return {
+        "balance": float(info.balance), "equity": float(info.equity), "margin_used": float(info.margin), "free_margin": float(info.margin_free),
+        "currency": info.currency,
+        "positions": [
+            {"ticket": int(p.ticket), "symbol": strip_suffix(p.symbol, suffix), "side": "buy" if int(p.type) == 0 else "sell", "volume": float(p.volume),
+             "price_open": float(p.price_open), "sl": float(p.sl or 0), "tp": float(p.tp or 0), "profit": float(p.profit), "comment": p.comment or ""}
+            for p in (positions or ())
+        ],
+        "orders": [
+            {"ticket": int(o.ticket), "symbol": strip_suffix(o.symbol, suffix), "type": int(o.type), "volume": float(o.volume_current),
+             "price": float(o.price_open), "sl": float(o.sl or 0), "tp": float(o.tp or 0), "comment": o.comment or ""}
+            for o in (orders or ())
+        ],
+    }
+
+
+_ENTRY = {0: "in", 1: "out", 2: "inout", 3: "out_by"}
+
+
+def build_deals(deals, suffix: str = "") -> list[dict]:
+    """Trade deals only. Balance, credit and other non-trade deal types (anything but buy or sell) are skipped."""
+    out = []
+    for d in deals or ():
+        if int(d.type) not in (0, 1) or int(d.entry) not in _ENTRY:
+            continue
+        out.append({
+            "deal_ticket": int(d.ticket), "position_ticket": int(d.position_id) or None, "symbol": strip_suffix(d.symbol, suffix),
+            "side": "buy" if int(d.type) == 0 else "sell", "entry": _ENTRY[int(d.entry)], "volume": float(d.volume), "price": float(d.price),
+            "profit": float(d.profit), "commission": float(d.commission), "swap": float(d.swap),
+            "deal_time": __import__("datetime").datetime.fromtimestamp(int(d.time), __import__("datetime").timezone.utc).isoformat(), "comment": d.comment or "",
+        })
+    return out
