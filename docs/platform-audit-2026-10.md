@@ -98,3 +98,6 @@ Still open after P0: monetary risk is estimated from the setup's declared maximu
 there are no broker specifications; there is no drawdown, correlation or margin check; there is no setup producer; there is no scheduler.
 The `request_execution` and `approve_paper_execution` functions have no API entry point yet (they need the same thin public wrappers when the
 operations view is built).
+
+## Demo execution bridge (added)
+`supabase/migrations/20261012160000_add_demo_execution_host_bridge.sql` and `execution-host/` add a pull-model, demo-only bridge to MT5: host registry (token hash only), claim with re-gating, step reports with dry-run protection, spec sync. Tested by `supabase/tests/execution_host_bridge.sql` (13 checks) and `execution-host/test_host_logic.py`. Position reconciliation back into the platform is not built yet.
