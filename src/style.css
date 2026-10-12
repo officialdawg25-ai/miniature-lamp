@@ -323,3 +323,12 @@ main > .content > footer > span { display: inline-flex; align-items: center; gap
 .ctlfield input:focus { outline: 0; border-color: var(--ink); }
 .ctlfield input:disabled { opacity: 0.6; }
 .ctlfield em { display: block; margin-top: 4px; font-size: 12px; font-style: normal; color: var(--muted); }
+
+/* Live chart */
+.candles { display: block; width: 100%; height: auto; margin-top: 12px; background: transparent; }
+.ctlsel { height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 14px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; align-self: flex-end; height: 38px; }
+.seg button { padding: 0 14px; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.seg button:first-child { border-left: 0; }
+.seg button.on { background: var(--ink); color: var(--bg); }
+.ctlrow { align-items: flex-end; }

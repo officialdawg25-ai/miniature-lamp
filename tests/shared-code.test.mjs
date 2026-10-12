@@ -13,3 +13,7 @@ test('scheduled-refresh yields.ts is identical to yield-ingestion yields.ts', ()
 test('scheduled-refresh policy.ts is identical to policy-rate-ingestion policy.ts', () => {
   same('supabase/functions/scheduled-refresh/policy.ts', 'supabase/functions/policy-rate-ingestion/policy.ts');
 });
+
+test('live-candles twelve.ts is identical to intraday-twelvedata twelve.ts', () => {
+  same('supabase/functions/live-candles/twelve.ts', 'supabase/functions/intraday-twelvedata/twelve.ts');
+});
