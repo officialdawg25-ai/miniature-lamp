@@ -221,3 +221,16 @@ test('a policy-differential signal never uses a rate before it was available or 
   // day 59: BoJ still stale -> missing. day 60: new BoJ value 0.75 and Fed 4.25 (10 days old) -> 3.5. day 61: same.
   assert.deepEqual(diff, [3.75, null, null, null, 3.5, 3.5]);
 });
+
+// ---- sharpeOf (fast path used by the resampling loops) ----------------------------------------------------------------
+import { sharpeOf, metrics as metricsFn } from '../supabase/functions/backtest-runner/backtest.ts';
+
+test('sharpeOf is bit-identical to metrics().sharpe, including degenerate inputs', () => {
+  const rnd = mulberry32(99);
+  for (const n of [0, 1, 2, 5, 300]) {
+    const x = Array.from({ length: n }, () => 0.001 * gauss(rnd) + 0.0002);
+    assert.equal(sharpeOf(x), metricsFn(x).sharpe);
+  }
+  assert.equal(sharpeOf([0.01, 0.01, 0.01]), metricsFn([0.01, 0.01, 0.01]).sharpe); // zero variance
+  assert.equal(sharpeOf([0.01, -0.02, 0.03], 52), metricsFn([0.01, -0.02, 0.03], 52).sharpe);
+});

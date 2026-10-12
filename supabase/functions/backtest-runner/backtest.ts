@@ -124,6 +124,16 @@ export function metrics(net: number[], ppy = 252): Metrics {
   };
 }
 
+// Annualized Sharpe ratio only. Same arithmetic, in the same order, as metrics(net).sharpe (so the values are identical),
+// without the other statistics. The resampling loops call this thousands of times and only need the Sharpe ratio.
+export function sharpeOf(net: number[], ppy = 252): number {
+  const n = net.length;
+  if (n < 2) return 0;
+  const mean = net.reduce((a, b) => a + b, 0) / n;
+  const sd = Math.sqrt(net.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1));
+  return sd > 0 ? (mean / sd) * Math.sqrt(ppy) : 0;
+}
+
 // ---- walk-forward ---------------------------------------------------------------------------------------------
 export type WalkForwardOptions = { initTrain: number; testBlock: number; holdout: number; costBp: number };
 export type Selection = { start: number; end: number; cfg: string; train_sharpe: number };
@@ -136,7 +146,7 @@ export function walkForward(
   selectFn: (trainEnd: number, ids: string[]) => { id: string; sharpe: number } = (trainEnd, ids) => {
     let best = { id: ids[0], sharpe: -Infinity };
     for (const id of ids) {
-      const s = metrics(simulate(positions[id].slice(0, trainEnd), ret.slice(0, trainEnd), carry.slice(0, trainEnd), opts.costBp)).sharpe;
+      const s = sharpeOf(simulate(positions[id].slice(0, trainEnd), ret.slice(0, trainEnd), carry.slice(0, trainEnd), opts.costBp));
       if (s > best.sharpe) best = { id, sharpe: s };
     }
     return best;
@@ -176,7 +186,7 @@ export function bootstrapSharpeCI(net: number[], blockLen: number, reps: number,
   for (let b = 0; b < reps; b++) {
     const sample: number[] = [];
     while (sample.length < n) { const s = Math.floor(rnd() * n); for (let k = 0; k < blockLen && sample.length < n; k++) sample.push(net[(s + k) % n]); }
-    out.push(metrics(sample, ppy).sharpe);
+    out.push(sharpeOf(sample, ppy));
   }
   out.sort((a, b) => a - b);
   return { lo: out[Math.floor(reps * 0.025)], hi: out[Math.floor(reps * 0.975)] };
@@ -187,13 +197,13 @@ export function bootstrapSharpeCI(net: number[], blockLen: number, reps: number,
 export function shiftPermutationP(pos: number[], ret: number[], carry: number[], costBp: number, reps: number, seed: number, minShift = 21): number {
   const n = pos.length;
   if (n <= minShift * 2) return NaN;
-  const observed = metrics(simulate(pos, ret, carry, costBp)).sharpe;
+  const observed = sharpeOf(simulate(pos, ret, carry, costBp));
   const rnd = mulberry32(seed);
   let ge = 0;
   for (let b = 0; b < reps; b++) {
     const shift = minShift + Math.floor(rnd() * (n - 2 * minShift));
     const shifted = pos.map((_, t) => pos[(t + shift) % n]);
-    if (metrics(simulate(shifted, ret, carry, costBp)).sharpe >= observed) ge++;
+    if (sharpeOf(simulate(shifted, ret, carry, costBp)) >= observed) ge++;
   }
   return (ge + 1) / (reps + 1);
 }
