@@ -2,9 +2,9 @@
 create or replace function intelligence.eurusd_month_end_trades()
 returns table(event_date date, placebo boolean, rel_return numeric, side integer, entry numeric, exit_price numeric, stopped boolean, net_pips numeric, net_pips_double numeric)
 language sql stable set search_path to '' as $function$
-  with fx as (select (b.ts at time zone 'UTC')::date d, b.high, b.low, b.close, lag(b.close) over (order by b.ts) pc
+  with fx as materialized (select (b.ts at time zone 'UTC')::date d, b.high, b.low, b.close, lag(b.close) over (order by b.ts) pc
               from market.price_bars b join core.instruments i on i.id = b.instrument_id where i.symbol = 'EURUSD' and b.timeframe = 'daily'),
-  cand as (select fx.*, row_number() over (order by d) rn from fx
+  cand as materialized (select fx.*, row_number() over (order by d) rn from fx
            where pc is not null and extract(isodow from d) between 1 and 5
              and not (extract(month from d) in (5, 8) and extract(isodow from d) = 1 and extract(month from d + 7) <> extract(month from d))),
   -- the last month in the data is incomplete, so its latest bar is not a month-end
@@ -12,7 +12,7 @@ language sql stable set search_path to '' as $function$
   ev as (select me.m, c.d, false placebo from me join cand c on c.d = me.d
          union all
          select me.m, p.d, true from me join cand c on c.d = me.d join cand p on p.rn = c.rn - 10 where date_trunc('month', p.d) = me.m),
-  etf as (select i.symbol, (b.ts at time zone 'UTC')::date d, b.close from market.price_bars b join core.instruments i on i.id = b.instrument_id
+  etf as materialized (select i.symbol, (b.ts at time zone 'UTC')::date d, b.close from market.price_bars b join core.instruments i on i.id = b.instrument_id
           where i.symbol in ('SPY', 'EZU') and b.timeframe = 'daily'),
   sig as (select ev.m, ev.d, ev.placebo,
             (select e.close from etf e where e.symbol = 'EZU' and e.d < ev.m order by e.d desc limit 1) ez0,
@@ -36,15 +36,17 @@ declare h record; net double precision[]; dates date[]; net2 double precision[];
 begin
   select * into h from intelligence.research_hypotheses where key = 'eurusd-month-end-hedge-rebalancing';
   if not found then raise exception 'hypothesis not registered'; end if;
+  -- the trade list is built once; every statistic below reads this copy
+  create temp table if not exists _month_end_trades on commit drop as select * from intelligence.eurusd_month_end_trades();
   select array_agg(x.net_pips::float8 order by x.event_date), array_agg(x.event_date order by x.event_date), array_agg(x.net_pips_double::float8 order by x.event_date),
          jsonb_agg(to_jsonb(x) order by x.event_date), count(*) filter (where x.stopped)
-    into net, dates, net2, trades, stops from intelligence.eurusd_month_end_trades() x where not x.placebo;
+    into net, dates, net2, trades, stops from pg_temp._month_end_trades x where not x.placebo;
   select avg(x.net_pips) filter (where not x.placebo), stddev_samp(x.net_pips) filter (where not x.placebo), count(*) filter (where not x.placebo),
          avg(x.net_pips) filter (where x.placebo), stddev_samp(x.net_pips) filter (where x.placebo), count(*) filter (where x.placebo)
-    into fm, fsd, fn, om, osd, onn from intelligence.eurusd_month_end_trades() x;
+    into fm, fsd, fn, om, osd, onn from pg_temp._month_end_trades x;
   wt := (fm - om) / sqrt(fsd ^ 2 / fn + osd ^ 2 / onn); wp := 1 - intelligence.norm_cdf(wt);
   select max(greatest(0, c.peak) - c.cum) * 0.10 into mdd from (select q.cum, max(q.cum) over (order by q.event_date) peak from (
-    select x.event_date, sum(x.net_pips) over (order by x.event_date) cum from intelligence.eurusd_month_end_trades() x where not x.placebo) q) c;
+    select x.event_date, sum(x.net_pips) over (order by x.event_date) cum from pg_temp._month_end_trades x where not x.placebo) q) c;
   base := intelligence.trade_stats(net, dates, '2015-01-01', 2000);
   dbl := intelligence.trade_stats(net2, dates, '2015-01-01', 200);
   checks := jsonb_build_array(

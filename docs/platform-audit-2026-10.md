@@ -240,3 +240,10 @@ Forward test `eurusd-fomc-day-long-stop56-forward`: the same rule on meetings fr
 
 Programme total: 27 hypotheses (22 retired; FOMC basket and its 56-pip EURUSD form validated on the historical sample only; plain G8 carry at "tested"; two forward tests collecting data).
 Checks on the forward code: Twelve Data EURUSD 15-minute bars include weekend quotes (unlike USDJPY); they do not enter the rule, which runs Tuesday 22:30 to Wednesday 22:00 UTC. On the three 2026 meetings already loaded, the 15-minute method and the daily method agree on every stop outcome (2026-06-17 and 2026-09-16 stopped, 2026-07-29 +72.7 vs +78.4 pips, the gap being the later entry). The 15-minute EURUSD backfill to 2020 runs through a temporary job that unschedules itself when done.
+
+### Batch 10: month-end equity hedge rebalancing (2026-10-13)
+New data: Twelve Data daily SPY and EZU, total-return (dividend-adjusted) closes from 2006-11, stored as inactive research-only instruments (`intraday-twelvedata` v7 requests `adjust=all` for these two only). `eurusd-month-end-hedge-rebalancing` (Melvin and Prins 2015): on the last London business day of each month (UK late-May and August bank-holiday Mondays skipped), sell EURUSD if EZU outperformed SPY month to date, buy if not; 56-pip stop. 230 events: mean net -7.61 pips (t -2.11), PF 0.71, maximum drawdown 230 USD at 0.01 lot; the placebo day ten trading days earlier also loses (-11.05). 1 of 10 checks: retired.
+
+Structural limit at 120 USD: the 0.01-lot minimum fixes risk at 0.10 USD per EURUSD pip regardless of edge, and the 36 USD kill switch allows at most a 360-pip drawdown. Historical drawdowns of real but modest edges exceed that (FOMC rule: 517 pips; a daily intraday rule with a 1-2 pip edge would be several hundred pips). Strategies that pass must be both significant and unusually smooth, or the account must allow smaller positions (for example a cent account).
+
+Programme total: 28 hypotheses (23 retired; FOMC basket and its 56-pip EURUSD form validated on the historical sample only; plain G8 carry at "tested"; two forward tests collecting data).
