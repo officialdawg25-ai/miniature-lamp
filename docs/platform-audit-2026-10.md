@@ -188,3 +188,43 @@ Both retired. Gold session drift is the strongest result in the programme, but i
 Forward test `xauusd-asia-london-session-drift-forward`: the unchanged rule (0.40 USD/oz cost) on trading days from 2026-10-14. `intraday-twelvedata` has a forward mode (from the newest stored bar, closed bars only), run hourly on weekdays for XAUUSD and USDJPY (crons `intraday-forward-xauusd`, `intraday-forward-usdjpy`); first call stored 34 closed bars each. `intelligence.run_gold_session_forward` stores a monthly interim run (cron `gold-session-forward-monthly`, monitoring only) and the decision is taken once at 250 days with the same checks plus the Welch session benchmark. The rule has no stop; a tradable version would need its own registered risk design under the account policy.
 
 Programme total: 19 hypotheses (18 retired, plain G8 carry at "tested", the forward test collecting data). None research-validated.
+
+### Batch 5: USDJPY local-hours depreciation (2026-10-13)
+Direction from Breedon and Ranaldo (2013): currencies tend to weaken during their home market's hours. The session theme was prompted by the gold result (disclosed in the specification); no USDJPY session returns were looked at before registration. Runner `intelligence.run_batch5` on `intelligence.usdjpy_session_windows()`, costs 1.8 pips (stress 3.6), alpha 0.05/2.
+
+| Hypothesis | Days | Mean net | t | Checks |
+|---|---|---|---|---|
+| usdjpy-tokyo-hours-jpy-depreciation (long 00:00-07:00 UTC) | 1,539 | -1.02 pips | -0.94 | 2 of 9 (halves +1.32 / -3.36, holdout -3.14, PF 0.93; Tokyo +0.78 vs New York +2.34 gross, Welch p 0.82) |
+| usdjpy-new-york-hours-usd-depreciation (short 13:00-21:00 UTC) | 1,482 | -4.14 pips | -3.19 | 1 of 9 (USDJPY rose more in New York, +2.34, than in London, +1.46) |
+
+Both retired. Over 2020-2026 the dollar's rise against the yen happened mostly in New York hours, the opposite of the published pattern, and no session window covers a 1.8-pip cost on its own.
+
+Programme total: 21 hypotheses (20 retired, plain G8 carry at "tested", the gold forward test collecting data). None research-validated.
+
+### Batch 6: daily gold momentum and FX large-move reversal (2026-10-13)
+New data: Twelve Data daily XAU/USD from 1988-12-23 (9,999 bars; `intraday-twelvedata` now takes `timeframe: "daily"` and refuses to write daily bars where another source already holds them). Fixed before any result: weekend quotes (163, from 2024 on, not tradable at the broker) and the one bar retrieved before its day ended are excluded. The parser now accepts date-only rows, which also repairs the live chart's 1d view (it had been rejecting every daily row; `live-candles` v3). A further fix (drop forming bars in backfill mode too, and page on the vendor count) is in the repository but not yet deployed: the deploy service returned internal errors; the research query excludes unfinished bars in the meantime.
+
+| Hypothesis | Sample | Obs. | Mean net | t | Checks |
+|---|---|---|---|---|---|
+| xauusd-daily-time-series-momentum (sign of 12-month return) | 1989-12 to 2026-10 | 9,582 days | +0.27 USD/oz/day | 1.49 | 5 of 9 (earns less than holding gold, +0.39; short-signal days -0.15) |
+| fx-usd-pairs-daily-large-move-reversal (fade moves > 2 sd) | 2007-09 to 2026-10 | 2,290 trades | -3.04 bp | -1.97 | 1 of 9 (1 of 7 pairs positive) |
+
+Both retired.
+
+### Batch 7: the dollar on scheduled FOMC days (2026-10-13)
+Data: `macro.fomc_meetings`, 157 scheduled statement dates 2007-2026 parsed from federalreserve.gov (calendar page and per-year historical pages, fetched through `pg_net`); unscheduled meetings, conference calls, notation votes and the cancelled March 2020 meeting excluded. Cross-check: all 30 Fed target changes in the rate series fall on these dates except the two March 2020 emergency cuts. The Alpha Vantage daily close was verified to be the 22:00 UTC price (against Twelve Data 15-minute USDJPY), so each day's bar contains the 18:00-19:00 UTC statement.
+
+`fx-usd-weakens-on-fomc-days` (Mueller, Tahbaz-Salehi and Vedolin 2017): short the dollar equally against the seven currencies from the previous close to the close of the statement day, costs per pair as in batch 6.
+
+| Events | Mean net | t | p | Halves | 2017 on | Double cost | Without best 5% | PF | FOMC vs other days |
+|---|---|---|---|---|---|---|---|---|---|
+| 152 | +11.26 bp | 1.99 | 0.024 | +12.17 / +10.35 | +9.97 (77) | +9.17 | +1.09 | 1.54 | +13.36 vs -0.75 bp, Welch p 0.007 |
+
+All 9 pre-registered checks pass: the first hypothesis in the programme to do so. Status `backtest_completed`, research-validated on this sample only. Caveats: the programme-wide Bonferroni level (0.0021 over 24 hypotheses) is not met; the 2017-on subsample alone is t 1.54 and the sample without 2008-2009 is t 1.15; the largest gains are dovish surprises (2008-12-16, 2009-03-18, 2015-03-18), the largest losses hawkish ones; observed after the run and not a registered check, USDJPY alone is flat while the other six pairs are +11.7 to +14.7 bp. Not tradable as specified on the 60 USD account (seven pairs exceed the open-risk limit; the daily swing on one EURUSD 0.01 lot is about 8 USD at one standard deviation, above the 3 USD per-trade limit without a stop). A one-pair version with a stop needs its own registration and intraday data.
+
+Programme total: 24 hypotheses (21 retired, 1 validated on the historical sample, plain G8 carry at "tested", the gold forward test collecting data).
+
+### Batch 8: tradable form of the FOMC result (2026-10-13)
+`eurusd-fomc-day-long-stop30`: long EURUSD from the previous close to the FOMC-day close with a 30-pip stop (the largest that keeps a 0.01 lot near the 3 USD per-trade limit), stop treated as hit 3 pips early for vendor differences and filled 2 pips worse. 152 events: mean net +6.53 pips (t 1.34, p 0.091), 94 trades stopped (62%), PF 1.31, -2.44 pips without the best 5%. 7 of 9 checks: retired. FOMC-day EURUSD ranges are wide enough that the stop cuts off most of the effect. The basket result stands; the binding constraint is account size, not the signal.
+
+Programme total: 25 hypotheses (22 retired, 1 validated on the historical sample, plain G8 carry at "tested", the gold forward test collecting data).

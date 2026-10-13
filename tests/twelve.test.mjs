@@ -26,3 +26,7 @@ test('vendor error is typed and the key is masked', () => {
 });
 test('missing values array throws', () => { assert.throws(() => parseTimeSeries({ status: 'ok' }), /no values/); });
 test('end date formatting', () => { assert.equal(formatEndDate('2024-01-15T10:14:00.000Z'), '2024-01-15 10:14:00'); });
+test('daily rows with a date only are stamped at 00:00 UTC', () => {
+  const r = parseTimeSeries({ status: 'ok', values: [{ datetime: '2024-01-15', open: '2050.1', high: '2060', low: '2040', close: '2055' }, { datetime: '2024-01-15 7', open: '1', high: '1', low: '1', close: '1' }] });
+  assert.equal(r.bars.length, 1); assert.equal(r.bars[0].ts, '2024-01-15T00:00:00.000Z'); assert.equal(r.rejected, 1);
+});

@@ -18,10 +18,11 @@ export function parseTimeSeries(payload: unknown): { bars: Bar[]; rejected: numb
   let rejected = 0;
   for (const row of p.values as Record<string, unknown>[]) {
     const dt = String(row?.datetime ?? "");
-    const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})$/.exec(dt);
+    // Daily rows carry only a date; that bar is stamped at 00:00 UTC.
+    const m = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?$/.exec(dt);
     const [o, h, l, c] = ["open", "high", "low", "close"].map((k) => (row?.[k] === "" || row?.[k] == null ? NaN : Number(row[k])));
     if (!m || ![o, h, l, c].every((x) => Number.isFinite(x) && x > 0) || h < Math.max(o, c, l) || l > Math.min(o, c, h)) { rejected++; continue; }
-    const ts = new Date(`${m[1]}T${m[2]}Z`).toISOString();
+    const ts = new Date(`${m[1]}T${m[2] ?? "00:00:00"}Z`).toISOString();
     byTs.set(ts, { ts, open: o, high: h, low: l, close: c });
   }
   return { bars: [...byTs.values()].sort((a, b) => a.ts.localeCompare(b.ts)), rejected };
