@@ -1,7 +1,9 @@
 // Pure helpers for Twelve Data time_series responses. No I/O and no runtime imports so they can be unit-tested with plain Node.
 export type Bar = { ts: string; open: number; high: number; low: number; close: number };
 
-export const SYMBOLS: Record<string, string> = { EURUSD: "EUR/USD", USDJPY: "USD/JPY", XAUUSD: "XAU/USD" };
+export const SYMBOLS: Record<string, string> = { EURUSD: "EUR/USD", USDJPY: "USD/JPY", XAUUSD: "XAU/USD", SPY: "SPY", EZU: "EZU" };
+// Research-only equity ETFs: requested as total-return (dividend-adjusted) series so month-to-date returns are not distorted by ex-dividend drops.
+export const ADJUSTED: ReadonlySet<string> = new Set(["SPY", "EZU"]);
 
 export class VendorError extends Error {
   code: number | null;
