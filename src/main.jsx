@@ -234,6 +234,14 @@ return <section className="panel healthpanel"><div className="panelhead"><div><s
 {d.decisions.length===0?<p className="healthnote">No decision records yet.</p>:<div className="healthrows">{d.decisions.map(x=><div key={x.symbol}><b>{x.symbol}</b><span>{String(x.outcome).replace('_',' ').toUpperCase()}</span><span>{(x.reason_codes||[]).join(', ')}</span><strong>{fmt(x.evaluated_at)}</strong></div>)}</div>}
 <p className="healthnote">The platform's own strategies currently produce no trade candidates, so every chain above comes from an operator idea. Nothing here is sent to a broker.</p></>}</section>}
 const STATUS_LABEL={research_hypothesis:'Registered',data_ready:'Data ready',candidate_implemented:'Implemented',backtest_completed:'Tested',oos_validated:'Research-validated',robustness_done:'Robustness done',paper:'Paper trading',restricted_live:'Restricted live',active:'Active',suspended:'Suspended',retired:'Rejected / retired'};
+// Evidence label shown to the owner, derived only from stored facts: the ledger stage, whether the specification is a forward
+// test, and whether the latest stored run passed. Historical validation never implies forward validation or tradability.
+function evidenceLabel(h){const run=(h.runs||[])[0],fwd=!!(h.specification&&h.specification.interim_policy);
+if(h.status==='retired')return{t:'REJECTED',c:'rej'};if(h.status==='suspended')return{t:'SUSPENDED',c:'rej'};
+if(h.status==='research_hypothesis')return{t:fwd?'FORWARD TESTING':'REGISTERED',c:''};if(h.status==='data_ready')return{t:'REGISTERED',c:''};
+if(h.status==='candidate_implemented')return{t:'TESTING',c:''};if(h.status==='backtest_completed')return run&&run.passed?{t:'HISTORICALLY VALIDATED',c:'ok'}:{t:'INCONCLUSIVE',c:''};
+if(['oos_validated','robustness_done'].includes(h.status))return{t:'HISTORICALLY VALIDATED',c:'ok'};if(h.status==='paper')return{t:'FORWARD TESTING',c:'ok'};
+return{t:STATUS_LABEL[h.status]||h.status,c:''}}
 function ResearchLedgerPanel(){const[d,setD]=useState(null),[err,setErr]=useState(null);
 useEffect(()=>{let live=true;(async()=>{try{const{data,error}=await supabase.rpc('get_research_ledger');if(!live)return;if(error)setErr(error.message);else setD(data)}catch(e){if(live)setErr(e instanceof Error?e.message:'Request failed')}})();return()=>{live=false}},[]);
 const dt=v=>v?new Date(v).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}):'—';
@@ -241,9 +249,10 @@ const num=(v,x=3)=>v==null||!Number.isFinite(Number(v))?'—':Number(v).toFixed(
 const hs=d?.hypotheses||[];const by=hs.reduce((m,h)=>{m[h.status]=(m[h.status]||0)+1;return m},{});const validated=hs.filter(h=>['oos_validated','robustness_done','paper','restricted_live','active'].includes(h.status));
 return <section className="panel healthpanel"><div className="panelhead"><div><small>RESEARCH LEDGER · EVERY TEST RECORDED</small><h2>Hypotheses, rules and evidence</h2></div><span className={err?'healthpill bad':'healthpill'}>{err?'UNAVAILABLE':!d?'LOADING':'LIVE'}</span></div>
 {err?<p className="healtherror">{err}</p>:!d?<p>Loading…</p>:<>
-<div className="healthstats"><div><small>HYPOTHESES</small><b>{hs.length}</b></div><div><small>REJECTED</small><b>{by.retired||0}</b></div><div><small>IN PROGRESS</small><b>{hs.length-(by.retired||0)-validated.length}</b></div><div><small>RESEARCH-VALIDATED</small><b>{validated.length}</b></div></div>
+<div className="healthstats"><div><small>HYPOTHESES</small><b>{hs.length}</b></div><div><small>REJECTED</small><b>{by.retired||0}</b></div><div><small>HISTORICALLY VALIDATED</small><b>{hs.filter(h=>evidenceLabel(h).t==='HISTORICALLY VALIDATED').length}</b></div><div><small>FORWARD TESTING</small><b>{hs.filter(h=>evidenceLabel(h).t==='FORWARD TESTING').length}</b></div><div><small>TRADABLE</small><b>0</b></div></div>
+<p className="healthnote">Historical validation is not forward validation, and neither authorises trading. TRADABLE requires verified broker contract terms, which need a connected MT5 host; none is connected, so the count is 0 by rule.</p>
 <p className="healthnote">{validated.length===0?'No strategy has passed its pre-registered criteria. The platform therefore produces no trade candidates from its own research.':'Research-validated means the pre-registered criteria were met on historical data; it does not approve live trading.'} Rules and pass criteria are frozen before each first run; a failed test is never re-tuned, and a new idea gets a new entry.</p>
-{hs.map(h=>{const r=h.runs[0];const sp=h.specification||{};return <details key={h.key} className="ledger"><summary><span className={'lstat '+(h.status==='retired'?'rej':['oos_validated','paper','active'].includes(h.status)?'ok':'')}>{STATUS_LABEL[h.status]||h.status}</span><b>{h.title}</b><em>{(h.instruments||[]).join(', ')} · {h.horizon||''} · registered {dt(h.registered_at)}</em></summary>
+{hs.map(h=>{const r=h.runs[0];const sp=h.specification||{};return <details key={h.key} className="ledger"><summary><span className={'lstat '+evidenceLabel(h).c} title={STATUS_LABEL[h.status]||h.status}>{evidenceLabel(h).t}</span><b>{h.title}</b><em>{(h.instruments||[]).join(', ')} · {h.horizon||''} · registered {dt(h.registered_at)}</em></summary>
 <p>{h.rationale}</p>
 {(sp.rule||sp.signal)&&<p className="healthnote"><b>Rule.</b> {sp.rule||sp.signal}</p>}
 {sp.costs&&<p className="healthnote"><b>Costs.</b> {sp.costs}</p>}

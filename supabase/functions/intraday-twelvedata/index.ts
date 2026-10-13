@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.0";
-import { SYMBOLS, VendorError, formatEndDate, parseTimeSeries } from "./twelve.ts";
+import { ADJUSTED, SYMBOLS, VendorError, formatEndDate, parseTimeSeries } from "./twelve.ts";
 
 // Backfills 15-minute bars backwards in time from Twelve Data (or, with direction "forward", fetches the newest closed bars), one request per call, so it never bursts against the free-plan limit and
 // adds negligible load. Authenticated with the shared cron secret. Dry run by default. Idempotent upserts.
@@ -54,6 +54,7 @@ Deno.serve(async (req: Request) => {
       if (end.slice(0, 10) <= targetStart) return json(200, { ok: true, done: true, reason: "target_start_reached", symbol, oldest_stored: oldest?.ts ?? null });
       params = new URLSearchParams({ symbol: SYMBOLS[symbol], interval: vendorInterval, outputsize: "5000", end_date: formatEndDate(end), timezone: "UTC", order: "DESC", apikey: API_KEY });
     }
+    if (ADJUSTED.has(symbol)) params.set("adjust", "all");
     const r = await fetch(`https://api.twelvedata.com/time_series?${params}`, { signal: AbortSignal.timeout(30000) });
     const payload = await r.json().catch(() => null);
     if (!payload) return json(502, { ok: false, error: "VENDOR_NOT_JSON", http_status: r.status });

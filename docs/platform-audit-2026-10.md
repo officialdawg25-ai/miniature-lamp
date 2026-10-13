@@ -228,3 +228,34 @@ Programme total: 24 hypotheses (21 retired, 1 validated on the historical sample
 `eurusd-fomc-day-long-stop30`: long EURUSD from the previous close to the FOMC-day close with a 30-pip stop (the largest that keeps a 0.01 lot near the 3 USD per-trade limit), stop treated as hit 3 pips early for vendor differences and filled 2 pips worse. 152 events: mean net +6.53 pips (t 1.34, p 0.091), 94 trades stopped (62%), PF 1.31, -2.44 pips without the best 5%. 7 of 9 checks: retired. FOMC-day EURUSD ranges are wide enough that the stop cuts off most of the effect. The basket result stands; the binding constraint is account size, not the signal.
 
 Programme total: 25 hypotheses (22 retired, 1 validated on the historical sample, plain G8 carry at "tested", the gold forward test collecting data).
+
+### Balance 120 USD and batch 9 (2026-10-13)
+Owner raised the demo balance to 120 USD (migration `set_demo_account_balance_120`, audited; option 2 percentages unchanged; the engine's peak, day-start and week-start equity moved to 120 because a deposit is not profit). Limits: 6 USD per trade, 12 daily, 24 weekly, 6 open, kill switch at 36 USD drawdown.
+
+`eurusd-fomc-day-long-stop56`: the FOMC-day EURUSD rule with the stop the new balance allows (56 pips + 2 slippage + 1.6 costs = 5.96 USD at 0.01 lot); alpha 0.025 because it is the second stop size tried. The parametric runner reproduces the 30-pip run exactly (0 mismatched days). 152 events: mean net +13.19 pips (t 2.03, p 0.021), 58 stopped, halves +16.96 / +9.43, 2017 on +8.54, double costs +11.59, without the best 5% +2.03, PF 1.53, Welch p 0.004 against other days. **All 9 checks pass.**
+
+In dollars at 0.01 lot it made +200.55 over 19 years (+1.32 per trade), but found after the run: the maximum drawdown is 51.69 USD, beyond the 36 USD kill switch, and the rule is in that drawdown now (peak 2024-11-07; since then 15 meetings, 11 stopped, 3 winners, -49.81 USD). The seven-pair basket shows the same break (15 meetings from 2024-12: -41.3 bp mean, 3 winners; 2017 to 2024-11: +22.4 bp). Verdict: research-validated on the 2007-2026 sample, not recommended for execution. 2025 and 2026 alone would have triggered the kill switch.
+
+Forward test `eurusd-fomc-day-long-stop56-forward`: the same rule on meetings from 2026-10-28, on 15-minute EURUSD bars (entry 22:30 UTC after rollover, stop path observed bar by bar). Decision once at 24 events: mean > 0, p <= 0.10, PF >= 1.2 and cumulative loss never 360 pips; retired at once if the cumulative loss reaches 360 pips. Paper only. EURUSD was added to `intraday-twelvedata` (v6, which also drops forming bars in backfill mode); crons `intraday-forward-eurusd` and `eurusd-fomc-forward-run`. Daily Alpha Vantage FX (`market-data-ingestion`) requires a signed-in user and has no schedule, so daily FX stops updating unless the owner refreshes it from the app.
+
+Programme total: 27 hypotheses (22 retired; FOMC basket and its 56-pip EURUSD form validated on the historical sample only; plain G8 carry at "tested"; two forward tests collecting data).
+Checks on the forward code: Twelve Data EURUSD 15-minute bars include weekend quotes (unlike USDJPY); they do not enter the rule, which runs Tuesday 22:30 to Wednesday 22:00 UTC. On the three 2026 meetings already loaded, the 15-minute method and the daily method agree on every stop outcome (2026-06-17 and 2026-09-16 stopped, 2026-07-29 +72.7 vs +78.4 pips, the gap being the later entry). The 15-minute EURUSD backfill to 2020 runs through a temporary job that unschedules itself when done.
+
+### Batch 10: month-end equity hedge rebalancing (2026-10-13)
+New data: Twelve Data daily SPY and EZU, total-return (dividend-adjusted) closes from 2006-11, stored as inactive research-only instruments (`intraday-twelvedata` v7 requests `adjust=all` for these two only). `eurusd-month-end-hedge-rebalancing` (Melvin and Prins 2015): on the last London business day of each month (UK late-May and August bank-holiday Mondays skipped), sell EURUSD if EZU outperformed SPY month to date, buy if not; 56-pip stop. 230 events: mean net -7.61 pips (t -2.11), PF 0.71, maximum drawdown 230 USD at 0.01 lot; the placebo day ten trading days earlier also loses (-11.05). 1 of 10 checks: retired.
+
+Structural limit at 120 USD: the 0.01-lot minimum fixes risk at 0.10 USD per EURUSD pip regardless of edge, and the 36 USD kill switch allows at most a 360-pip drawdown. Historical drawdowns of real but modest edges exceed that (FOMC rule: 517 pips; a daily intraday rule with a 1-2 pip edge would be several hundred pips). Strategies that pass must be both significant and unusually smooth, or the account must allow smaller positions (for example a cent account).
+
+Programme total: 28 hypotheses (23 retired; FOMC basket and its 56-pip EURUSD form validated on the historical sample only; plain G8 carry at "tested"; two forward tests collecting data).
+
+### Batch 11: equity announcement-day premium (2026-10-13)
+Owner chose to stay on the Standard account and test only well-founded event ideas. Equity-index CFDs avoid the 0.01-lot problem (US500 position size can match the 6 USD limit; contract terms to be confirmed from MT5), so the announcement-day equity premium was tested on SPY total-return closes, sized at 200 USD notional with a 3% stop, drawdown limit 36 USD, alpha 0.025.
+
+| Hypothesis | Events | Mean net | t | Checks |
+|---|---|---|---|---|
+| spy-fomc-day-announcement-premium (Savor and Wilson 2013; Lucca and Moench 2015) | 157 (2007-2026) | +23.5 bp | 2.28 | 8 of 10: first half +48.1, second half -0.7, since 2016 -0.1 bp (85 events) |
+| spy-cpi-ppi-payrolls-day-premium (Savor and Wilson 2013) | 198 (2021-2026) | +8.2 bp | 1.03 | 6 of 9: not above other days (Welch p 0.26), -4.0 without the best 5% |
+
+Both retired. The FOMC equity premium was large before 2016 and has been absent since, matching later literature.
+
+Programme total: 30 hypotheses (25 retired; FOMC dollar basket and its 56-pip EURUSD form validated on the historical sample only and currently in drawdown; plain G8 carry at "tested"; two forward tests collecting data).
