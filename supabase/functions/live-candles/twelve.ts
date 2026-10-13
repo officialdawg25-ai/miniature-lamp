@@ -1,7 +1,7 @@
 // Pure helpers for Twelve Data time_series responses. No I/O and no runtime imports so they can be unit-tested with plain Node.
 export type Bar = { ts: string; open: number; high: number; low: number; close: number };
 
-export const SYMBOLS: Record<string, string> = { USDJPY: "USD/JPY", XAUUSD: "XAU/USD" };
+export const SYMBOLS: Record<string, string> = { EURUSD: "EUR/USD", USDJPY: "USD/JPY", XAUUSD: "XAU/USD" };
 
 export class VendorError extends Error {
   code: number | null;
