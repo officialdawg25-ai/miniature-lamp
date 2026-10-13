@@ -247,3 +247,15 @@ New data: Twelve Data daily SPY and EZU, total-return (dividend-adjusted) closes
 Structural limit at 120 USD: the 0.01-lot minimum fixes risk at 0.10 USD per EURUSD pip regardless of edge, and the 36 USD kill switch allows at most a 360-pip drawdown. Historical drawdowns of real but modest edges exceed that (FOMC rule: 517 pips; a daily intraday rule with a 1-2 pip edge would be several hundred pips). Strategies that pass must be both significant and unusually smooth, or the account must allow smaller positions (for example a cent account).
 
 Programme total: 28 hypotheses (23 retired; FOMC basket and its 56-pip EURUSD form validated on the historical sample only; plain G8 carry at "tested"; two forward tests collecting data).
+
+### Batch 11: equity announcement-day premium (2026-10-13)
+Owner chose to stay on the Standard account and test only well-founded event ideas. Equity-index CFDs avoid the 0.01-lot problem (US500 position size can match the 6 USD limit; contract terms to be confirmed from MT5), so the announcement-day equity premium was tested on SPY total-return closes, sized at 200 USD notional with a 3% stop, drawdown limit 36 USD, alpha 0.025.
+
+| Hypothesis | Events | Mean net | t | Checks |
+|---|---|---|---|---|
+| spy-fomc-day-announcement-premium (Savor and Wilson 2013; Lucca and Moench 2015) | 157 (2007-2026) | +23.5 bp | 2.28 | 8 of 10: first half +48.1, second half -0.7, since 2016 -0.1 bp (85 events) |
+| spy-cpi-ppi-payrolls-day-premium (Savor and Wilson 2013) | 198 (2021-2026) | +8.2 bp | 1.03 | 6 of 9: not above other days (Welch p 0.26), -4.0 without the best 5% |
+
+Both retired. The FOMC equity premium was large before 2016 and has been absent since, matching later literature.
+
+Programme total: 30 hypotheses (25 retired; FOMC dollar basket and its 56-pip EURUSD form validated on the historical sample only and currently in drawdown; plain G8 carry at "tested"; two forward tests collecting data).
