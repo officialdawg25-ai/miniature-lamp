@@ -1,0 +1,21 @@
+name: MT5 host logic tests
+on:
+  push:
+    paths:
+      - "execution-host/**"
+      - ".github/workflows/mt5-host-logic.yml"
+  pull_request:
+    paths:
+      - "execution-host/**"
+      - ".github/workflows/mt5-host-logic.yml"
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run host logic tests
+        working-directory: execution-host
+        run: python -m unittest -v test_host_logic
