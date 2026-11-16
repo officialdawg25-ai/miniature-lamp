@@ -18,7 +18,7 @@ import host_logic as logic
 
 PLATFORM_URL = os.environ.get("PLATFORM_URL", "https://ieocpcapgwusbojzrrxr.supabase.co/functions/v1/execution-host-api")
 HOST_TOKEN = os.environ.get("HOST_TOKEN", "")
-SYMBOLS = [s.strip().upper() for s in os.environ.get("SYMBOLS", "USDJPY,XAUUSD").split(",") if s.strip()]
+SYMBOLS = [s.strip().upper() for s in os.environ.get("SYMBOLS", "XAUUSD").split(",") if s.strip()]
 SUFFIX = os.environ.get("SYMBOL_SUFFIX", "")          # some brokers append a suffix to symbol names on certain account types
 SEND_ORDERS = os.environ.get("SEND_DEMO_ORDERS", "0") == "1"   # default is a dry run: orders are checked, never sent
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "15"))
@@ -57,17 +57,21 @@ def connect(mt5):
     return info
 
 
-def sync_specs(mt5, account_currency: str) -> None:
-    specs = []
+def sync_specs(mt5, account_currency: str) -> dict:
+    specs = {}
     for base in SYMBOLS:
         name = base + SUFFIX
         info = mt5.symbol_info(name)
         if info is None or not mt5.symbol_select(name, True):
-            log(f"symbol {name} not available on this account; skipped")
-            continue
-        specs.append(logic.spec_from_symbol_info(base, info, account_currency))
-    if specs:
-        log(f"synced {api('sync_specs', specs=specs).get('specs_upserted')} symbol specifications")
+            available = []
+            if base == "XAUUSD":
+                available = [s.name for s in (mt5.symbols_get() or ()) if "XAU" in s.name.upper()][:20]
+            suffix_hint = f" Available gold symbols: {', '.join(available)}." if available else ""
+            raise SystemExit(f"Required symbol {name} is not available in Market Watch.{suffix_hint} Set SYMBOL_SUFFIX if your broker uses a suffix, then restart.")
+        specs[base] = logic.spec_from_symbol_info(base, info, account_currency)
+    result = api("sync_specs", specs=list(specs.values()))
+    log(f"synced {result.get('specs_upserted')} symbol specifications: {', '.join(specs)}")
+    return specs
 
 
 def report_state(mt5, deals_days: int = 7) -> None:
@@ -137,12 +141,7 @@ def main() -> None:
     info = connect(mt5)
     log(f"connected to a demo account (currency {info.currency}); orders {'WILL' if SEND_ORDERS else 'will NOT'} be sent (SEND_DEMO_ORDERS)")
     log(f"platform says: {api('ping')}")
-    sync_specs(mt5, info.currency)
-    specs = {}
-    for base in SYMBOLS:
-        si = mt5.symbol_info(base + SUFFIX)
-        if si is not None:
-            specs[base] = logic.spec_from_symbol_info(base, si, info.currency)
+    specs = sync_specs(mt5, info.currency)
     failures = 0
     last_state = 0.0
     while not os.path.exists(STOP_FILE):
